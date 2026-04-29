@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Noa Pilates</title>
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- Theme colors -->
+  <meta name="theme-color" content="#5c2d3a" />
+  <meta name="background-color" content="#f5f0eb" />
+
+  <!-- iOS / Safari PWA support -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Noa Pilates" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+  <!-- Splash screens iOS (optional but nice) -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+  <!-- Android -->
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <!-- SEO / share -->
+  <meta name="description" content="Book your Pilates classes and manage packages at Noa Pilates Ericeira." />
+  <meta property="og:title" content="Noa Pilates" />
+  <meta property="og:description" content="Book classes & manage your Pilates packages." />
+  <meta property="og:type" content="website" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f5f0eb; font-family: Georgia, serif; }
+    /* Safe area support for iPhone notch / home bar */
+    #root {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/main.jsx"></script>
+
+  <!-- Register service worker -->
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js")
+          .then(() => console.log("Noa PWA: service worker registered"))
+          .catch(err => console.warn("SW error:", err));
+      });
+    }
+  </script>
+</body>
+</html>
