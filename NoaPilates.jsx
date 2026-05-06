@@ -1,8 +1,33 @@
 import { useState, useEffect } from "react";
 
+// ── PERSISTENCE HELPERS ──────────────────────────────────────────────
+// Wrapper around localStorage that gracefully handles SSR and disabled storage
+const STORAGE_KEY = "noa_pilates_v1";
+const loadState = () => {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+};
+const saveState = (state) => {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {}
+};
+// Use stored value if it exists, otherwise the fallback
+const persisted = loadState() || {};
+const useP = (key, fallback) => useState(() => persisted[key] !== undefined ? persisted[key] : fallback);
+
+
 // ── ADMIN CREDENTIALS ─────────────────────────────────────────────────
-const ADMIN_EMAIL = "admin@noapilates.pt";
-const ADMIN_PASSWORD = "noa2026";
+// The admin account is set up on first use (registered the first time someone
+// tries to access the admin area). After that, it can only be modified from
+// inside the admin panel (Admin Settings).
+// NOTE: with no backend, admin credentials reset when the browser storage clears.
+// When we wire up Firebase, this becomes properly persistent.
 
 // ── LOGO ──────────────────────────────────────────────────────────────
 const NoaLogo = ({ size = 32, color = "#9a6070" }) => (
@@ -27,7 +52,7 @@ const NoaLogoBadge = ({ size = 32 }) => (
 );
 
 // ── PALETTE ───────────────────────────────────────────────────────────
-const C = {
+const LIGHT_C = {
   bg:"#f5f0eb", surface:"#ffffff", surfaceAlt:"#faf7f4",
   border:"#e8d8dc", borderMid:"#ddc0c6",
   text:"#3d1f28", textMid:"#7a4a55", textLight:"#b09090",
@@ -38,6 +63,21 @@ const C = {
   blue:"#3a5878", bluePale:"#edf2f8", blueBorder:"#b0c4d8",
   teal:"#2a6a68", tealPale:"#e8f4f3", tealBorder:"#a0cccb",
 };
+
+const DARK_C = {
+  bg:"#1a0f14", surface:"#2a1820", surfaceAlt:"#221318",
+  border:"#3d2330", borderMid:"#4a2c3a",
+  text:"#f0e0e5", textMid:"#c8a0b0", textLight:"#7a5a65",
+  wine:"#d49aaa", wineLight:"#b87890", winePale:"#3d2330",
+  green:"#7ab088", greenPale:"#1f3528", greenBorder:"#3d6048",
+  amber:"#e0b870", amberPale:"#3a2a18", amberBorder:"#5a4020",
+  red:"#e08080", redPale:"#3a1818", redBorder:"#5a2a2a",
+  blue:"#90b0d0", bluePale:"#1a2530", blueBorder:"#384858",
+  teal:"#80c0bc", tealPale:"#1a3030", tealBorder:"#385858",
+};
+
+// Default to light; component will override via state
+let C = LIGHT_C;
 
 // ── TRANSLATIONS ─────────────────────────────────────────────────────
 const T = {
@@ -130,6 +170,123 @@ const T = {
     passwordSet:"Password updated for",
     confirmSetPassword:"Set Password",
     cancelAction:"Cancel",
+    // Credit validation
+    noCreditTitle:"No credit available",
+    noCreditDesc:"To book this class please contact the studio to purchase a package.",
+    noCreditForType:"No credit for this class type — contact the studio.",
+    pkgNotPaid:"Your package is not paid yet — contact the studio.",
+    pkgExpired:"Package expired",
+    pkgWeeklyLimit:"Weekly limit reached for this package",
+    pkgNoSessionsLeft:"No classes left in your package",
+    creditReturned:"Credit returned to your package",
+    expiresOn:"Expires",
+    classesLeft:"left",
+    weekUsed:"used this week",
+    contactToBook:"📞 Contact studio to book",
+    purchasePackage:"Buy a package",
+    monthlyPlan:"Monthly plan",
+    expiresIn:"Expires in",
+    daysShort:"d",
+    weekResetsOn:"Resets",
+    // Admin tabs & features
+    manageSchedule:"Manage Schedule",
+    managePackages:"Manage Packages",
+    adminSettings:"Admin Settings",
+    addClass:"+ Add class",
+    editClass:"Edit class",
+    deleteClass:"Delete",
+    saveChanges:"Save",
+    classTime:"Time (e.g. 10:00)",
+    className:"Class name",
+    classTag:"Tag (optional)",
+    extraCredits:"+ Extra credits",
+    extendValidity:"Extend validity",
+    grantBonus:"🎁 Grant bonus",
+    bonusType:"Type",
+    bonusQty:"Number of classes",
+    bonusValidity:"Validity (days)",
+    creditsAdded:"Credits added",
+    daysAdded:"Days added",
+    bonusGranted:"Bonus granted",
+    unmarkPaid:"Unmark paid",
+    expiryFromPayment:"Expiry from payment",
+    notPaidYet:"Not paid yet",
+    paidOn:"Paid",
+    daysRemaining:"days remaining",
+    expired:"EXPIRED",
+    editProfile:"Edit Profile",
+    currentPassword:"Current password",
+    newPasswordOpt:"New password (leave empty to keep)",
+    confirmNewPasswordOpt:"Confirm new password",
+    saveProfile:"Save",
+    profileUpdated:"Profile updated",
+    classesBooked:"Classes booked",
+    sessionsLogTitle:"Class history",
+    // Waitlist
+    joinWaitlist:"Join waitlist",
+    onWaitlist:"On waitlist",
+    leaveWaitlist:"Leave waitlist",
+    waitlistPosition:"Position",
+    spotAvailable:"🎉 A spot is available!",
+    confirmIn:"Confirm within",
+    offerExpired:"Offer expired — sign up again if you want",
+    confirmSpot:"Confirm spot",
+    declineSpot:"Decline",
+    waitlistFull:"Class is full — join the waitlist?",
+    waitlistFor:"Waitlist for",
+    nobodyWaiting:"Nobody on waitlist",
+    // No-show
+    markNoShow:"Mark as no-show",
+    noShow:"NO-SHOW",
+    unmarkNoShow:"Remove no-show",
+    noShowHistory:"No-show history",
+    noShowsCount:"no-shows",
+    confirmNoShowQ:"Mark this booking as no-show? The client's credit will stay consumed.",
+    // Notes
+    privateNotes:"Private notes",
+    notesPlaceholder:"Health info, restrictions, preferences (visible only to admin)",
+    saveNotes:"Save notes",
+    healthFlag:"⚠️ Has notes",
+    // Birthday
+    birthday:"Birthday",
+    bdayOptional:"Birthday (optional, day/month only)",
+    day:"Day",
+    month:"Month",
+    bdayToday:"🎂 Birthday today!",
+    upcomingBdays:"Upcoming birthdays",
+    happyBirthday:"Happy Birthday",
+    // Instructors
+    instructors:"Instructors",
+    manageInstructors:"Manage Instructors",
+    addInstructor:"+ Add",
+    instructor:"Instructor",
+    noInstructor:"No instructor",
+    selectInstructor:"Select",
+    instructorName:"Instructor name",
+    // Freeze
+    freeze:"❄️ Freeze",
+    freezeMembership:"Freeze package",
+    freezeDays:"Days to freeze",
+    freezeReason:"Reason (optional)",
+    freezeReasonPlaceholder:"e.g. holidays, illness",
+    frozenStatus:"FROZEN",
+    unfreeze:"☀️ Unfreeze",
+    frozenUntil:"Frozen until",
+    daysShortLabel:"d",
+    darkMode:"Dark mode",
+    lightMode:"Light mode",
+    thisWeek:"This week",
+    nextWeek:"Next week",
+    inWeeks:"In",
+    weekN:"week",
+    weeksN:"weeks",
+    bookRecurring:"🔁 Book recurring",
+    recurringTitle:"Book multiple weeks",
+    recurringDesc:"Book this class for the upcoming weeks all at once.",
+    recurringWeeksLabel:"Number of upcoming weeks (1-4)",
+    bookAll:"Book all",
+    recurringResult:"Booked",
+    recurringSkipped:"skipped (no spots / no credit)",
   },
   pt: {
     welcome:"Bem-vinda", signIn:"Entrar", signUp:"Criar conta", or:"ou",
@@ -220,11 +377,128 @@ const T = {
     passwordSet:"Palavra-passe atualizada para",
     confirmSetPassword:"Definir Palavra-passe",
     cancelAction:"Cancelar",
+    // Credit validation
+    noCreditTitle:"Sem crédito disponível",
+    noCreditDesc:"Para marcar esta aula, contacta o estúdio para comprar um pacote.",
+    noCreditForType:"Sem crédito para este tipo de aula — contacta o estúdio.",
+    pkgNotPaid:"O teu pacote ainda não está pago — contacta o estúdio.",
+    pkgExpired:"Pacote expirado",
+    pkgWeeklyLimit:"Limite semanal deste pacote atingido",
+    pkgNoSessionsLeft:"Sem aulas restantes no teu pacote",
+    creditReturned:"Crédito devolvido ao pacote",
+    expiresOn:"Expira",
+    classesLeft:"restantes",
+    weekUsed:"usadas esta semana",
+    contactToBook:"📞 Contacta o estúdio para marcar",
+    purchasePackage:"Comprar pacote",
+    monthlyPlan:"Plano mensal",
+    expiresIn:"Expira em",
+    daysShort:"d",
+    weekResetsOn:"Reinicia",
+    // Admin tabs & features
+    manageSchedule:"Gerir Horário",
+    managePackages:"Gerir Pacotes",
+    adminSettings:"Definições Admin",
+    addClass:"+ Adicionar aula",
+    editClass:"Editar aula",
+    deleteClass:"Apagar",
+    saveChanges:"Guardar",
+    classTime:"Hora (ex: 10:00)",
+    className:"Nome da aula",
+    classTag:"Etiqueta (opcional)",
+    extraCredits:"+ Créditos extra",
+    extendValidity:"Estender validade",
+    grantBonus:"🎁 Atribuir bónus",
+    bonusType:"Tipo",
+    bonusQty:"Número de aulas",
+    bonusValidity:"Validade (dias)",
+    creditsAdded:"Créditos adicionados",
+    daysAdded:"Dias adicionados",
+    bonusGranted:"Bónus atribuído",
+    unmarkPaid:"Remover pagamento",
+    expiryFromPayment:"Validade desde pagamento",
+    notPaidYet:"Ainda não pago",
+    paidOn:"Pago",
+    daysRemaining:"dias restantes",
+    expired:"EXPIRADO",
+    editProfile:"Editar Perfil",
+    currentPassword:"Palavra-passe atual",
+    newPasswordOpt:"Nova palavra-passe (deixa vazio para manter)",
+    confirmNewPasswordOpt:"Confirmar nova palavra-passe",
+    saveProfile:"Guardar",
+    profileUpdated:"Perfil atualizado",
+    classesBooked:"Aulas marcadas",
+    sessionsLogTitle:"Histórico de aulas",
+    // Waitlist
+    joinWaitlist:"Entrar na lista de espera",
+    onWaitlist:"Na lista de espera",
+    leaveWaitlist:"Sair da lista",
+    waitlistPosition:"Posição",
+    spotAvailable:"🎉 Há um lugar disponível!",
+    confirmIn:"Confirma dentro de",
+    offerExpired:"Tempo expirado — podes voltar a inscrever-te",
+    confirmSpot:"Confirmar lugar",
+    declineSpot:"Recusar",
+    waitlistFull:"A aula está cheia — entrar na lista de espera?",
+    waitlistFor:"Lista de espera para",
+    nobodyWaiting:"Lista vazia",
+    // No-show
+    markNoShow:"Marcar como falta",
+    noShow:"FALTA",
+    unmarkNoShow:"Remover falta",
+    noShowHistory:"Histórico de faltas",
+    noShowsCount:"faltas",
+    confirmNoShowQ:"Marcar esta aula como falta? O crédito da cliente permanece consumido.",
+    // Notes
+    privateNotes:"Notas privadas",
+    notesPlaceholder:"Saúde, restrições, preferências (visível só ao admin)",
+    saveNotes:"Guardar notas",
+    healthFlag:"⚠️ Tem notas",
+    // Birthday
+    birthday:"Aniversário",
+    bdayOptional:"Aniversário (opcional, só dia/mês)",
+    day:"Dia",
+    month:"Mês",
+    bdayToday:"🎂 Aniversário hoje!",
+    upcomingBdays:"Aniversários próximos",
+    happyBirthday:"Parabéns",
+    // Instructors
+    instructors:"Instrutoras",
+    manageInstructors:"Gerir Instrutoras",
+    addInstructor:"+ Adicionar",
+    instructor:"Instrutora",
+    noInstructor:"Sem instrutora",
+    selectInstructor:"Selecionar",
+    instructorName:"Nome da instrutora",
+    // Freeze
+    freeze:"❄️ Pausar",
+    freezeMembership:"Pausar pacote",
+    freezeDays:"Dias a pausar",
+    freezeReason:"Motivo (opcional)",
+    freezeReasonPlaceholder:"ex: férias, doença",
+    frozenStatus:"PAUSADO",
+    unfreeze:"☀️ Despausar",
+    frozenUntil:"Pausado até",
+    daysShortLabel:"d",
+    darkMode:"Modo escuro",
+    lightMode:"Modo claro",
+    thisWeek:"Esta semana",
+    nextWeek:"Próxima semana",
+    inWeeks:"Daqui a",
+    weekN:"semana",
+    weeksN:"semanas",
+    bookRecurring:"🔁 Marcar várias",
+    recurringTitle:"Marcar várias semanas",
+    recurringDesc:"Marca esta aula para as próximas semanas de uma vez.",
+    recurringWeeksLabel:"Número de semanas seguintes (1-4)",
+    bookAll:"Marcar todas",
+    recurringResult:"Marcadas",
+    recurringSkipped:"saltadas (sem lugar / crédito)",
   },
 };
 
-// ── SCHEDULE ─────────────────────────────────────────────────────────
-const SCHEDULE = {
+// ── SCHEDULE (default; admin can edit at runtime) ────────────────────
+const DEFAULT_SCHEDULE = {
   Monday:[{time:"10:00",name:"Reformer",tag:null},{time:"11:00",name:"Dynamic Mat",tag:null},{time:"18:00",name:"Reformer",tag:null},{time:"19:00",name:"Reformer",tag:null}],
   Tuesday:[{time:"9:30",name:"Reformer",tag:null},{time:"10:30",name:"Reformer",tag:"Power Flow"},{time:"12:00",name:"Mat",tag:null}],
   Wednesday:[{time:"10:00",name:"Reformer",tag:null},{time:"11:00",name:"Reformer",tag:"Back pain & injury"}],
@@ -249,8 +523,8 @@ const TAG_STYLE = {
   "Beginner":{color:C.teal,bg:C.tealPale,border:C.tealBorder},
 };
 
-// ── PACKAGES ─────────────────────────────────────────────────────────
-const PACKAGES = {
+// ── PACKAGES (default; admin can edit prices at runtime) ─────────────
+const DEFAULT_PACKAGES = {
   membership:{label:"Monthly Membership",icon:"📅",color:C.wine,bg:C.winePale,border:C.borderMid,isMonthly:true,
     groups:[
       {name:"Reformer",opts:[{id:"ref_1x",label:"1 class/week",price:115},{id:"ref_2x",label:"2 classes/week",price:220},{id:"ref_3x",label:"3 classes/week",price:320},{id:"ref_ul",label:"Unlimited",price:350}]},
@@ -296,14 +570,31 @@ const nextOccurrenceOfDay = (dayName) => {
   return d;
 };
 
+// Get the Date for a weekday N weeks from now (0 = next occurrence, 1 = +1 week).
+const dateForDayInWeek = (dayName, weekOffset = 0) => {
+  const base = nextOccurrenceOfDay(dayName);
+  const d = new Date(base);
+  d.setDate(d.getDate() + (weekOffset * 7));
+  return d;
+};
+
+// ISO date string YYYY-MM-DD
+const isoDate = (d) => {
+  const dt = d instanceof Date ? d : new Date(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth()+1).padStart(2,"0");
+  const day = String(dt.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+};
+
 // Format day label like "Monday, May 5"
-const dayLabel = (dayName, lang) => {
+const dayLabel = (dayName, lang, weekOffset = 0) => {
   const t = T[lang];
-  const d = nextOccurrenceOfDay(dayName);
+  const d = dateForDayInWeek(dayName, weekOffset);
   return `${t.days[dayName]}, ${t.monthNames[d.getMonth()]} ${d.getDate()}`;
 };
-const shortDayLabel = (dayName, lang) => {
-  const d = nextOccurrenceOfDay(dayName);
+const shortDayLabel = (dayName, lang, weekOffset = 0) => {
+  const d = dateForDayInWeek(dayName, weekOffset);
   return `${T[lang].dayShort[dayName]} ${d.getDate()}`;
 };
 
@@ -336,24 +627,270 @@ const deadlineLabel = (dayName, timeStr, lang) => {
   return `${t.openUntil} ${arr[dl.getDay()]} ${pad(dl.getHours())}:${pad(dl.getMinutes())}`;
 };
 
-const mkEntry = (catKey,opt) => ({
-  id:Date.now()+Math.random(), pkgKey:catKey, optId:opt.id,
-  label:opt.label, qty:opt.qty||null, price:opt.price,
-  validity:opt.validity||null, note:opt.note||null,
-  paid:false, paidDate:null, startDate:fmt(lisbonNow()), sessions:[],
-});
+const mkEntry = (catKey,opt) => {
+  const now = lisbonNow();
+  return {
+    id:Date.now()+Math.random(), pkgKey:catKey, optId:opt.id,
+    label:opt.label, qty:opt.qty||null, price:opt.price,
+    validity:opt.validity||null, note:opt.note||null,
+    paid:false, paidDate:null, startDate:fmt(now),
+    purchaseTs: now.getTime(),  // timestamp for validity calculations
+    sessions:[],
+  };
+};
+
+// Stable lookup of which package keys are monthly (does NOT change when admin edits prices)
+const PKG_IS_MONTHLY = {
+  membership: true,
+  reformer: false,
+  mat: false,
+  combo: false,
+  visitor: false,
+  private: false,
+  intro: false,
+};
+
+// ── CREDIT VALIDATION HELPERS ────────────────────────────────────────
+// Categorize a class name to a "type" used to match packages
+// "reformer" or "mat" — reformer-tagged classes are reformer; everything mat-named is mat
+const classTypeOf = (className) => {
+  if (!className) return "other";
+  if (className === "Reformer") return "reformer";
+  if (className === "Mat" || className === "Dynamic Mat" || className === "Mat Pilates") return "mat";
+  return "other";
+};
+
+// Parse a validity string like "6 weeks", "12 weeks", "3 months", "6 months", "2 weeks"
+// Returns number of days, or null if no validity (drop-in / private — short term, treat as 30 days fallback)
+const validityToDays = (v) => {
+  if (!v) return null;
+  const m = v.match(/(\d+)\s*(week|weeks|month|months)/i);
+  if (!m) return null;
+  const n = parseInt(m[1],10);
+  if (m[2].toLowerCase().startsWith("week")) return n*7;
+  return n*30;
+};
+
+// Returns the expiry timestamp of a package, or null if no expiry applies
+// IMPORTANT: validity counts from the PAYMENT date, not the purchase date.
+// If the package isn't paid yet, the package has no credits available (handled elsewhere).
+const pkgExpiryTs = (p) => {
+  // Use paidTs as the start of the validity window. Fall back to purchaseTs
+  // for legacy packages that were created before this feature existed.
+  const start = p.paidTs || p.purchaseTs || null;
+  if (!start) return null;
+  // Allow admin to extend validity manually (extraDays added on top)
+  const extraDays = p.extraValidityDays || 0;
+  // Monthly memberships → 30 days from payment
+  const isMonthly = PKG_IS_MONTHLY[p.pkgKey];
+  if (isMonthly) return start + (30 + extraDays)*24*60*60*1000;
+  // Class packages → use validity string
+  const days = validityToDays(p.validity);
+  if (days == null) {
+    // No fixed validity (drop-in / private / trial). Still respect extra days if any.
+    if (extraDays > 0) return start + extraDays*24*60*60*1000;
+    return null;
+  }
+  return start + (days + extraDays)*24*60*60*1000;
+};
+
+// Is the package within its validity window?
+const pkgIsValid = (p) => {
+  const exp = pkgExpiryTs(p);
+  if (exp == null) return true; // drop-ins never expire
+  return lisbonNow().getTime() < exp;
+};
+
+// Days remaining until expiry (for display)
+const pkgDaysLeft = (p) => {
+  const exp = pkgExpiryTs(p);
+  if (exp == null) return null;
+  const ms = exp - lisbonNow().getTime();
+  if (ms <= 0) return 0;
+  return Math.ceil(ms / (24*60*60*1000));
+};
+
+// Sessions left for a package (qty - used). For mix&match combos returns total sessions left.
+// Includes any extraSessions granted by admin (for memberships without qty, this is the only counter).
+const pkgSessionsLeft = (p) => {
+  const used = p.sessions?.length || 0;
+  if (p.qty != null) {
+    return p.qty - used;
+  }
+  // No qty (membership) — extraSessions is an add-on bucket the admin can grant
+  if (p.extraSessions != null) return p.extraSessions - used;
+  return Infinity;
+};
+
+// For Combo Mix & Match: how many sessions of a specific type are left
+// Combo packages: half of qty is reformer, half is mat (5+5 or 10+10)
+const comboTypeLeft = (p, type) => {
+  if (p.pkgKey !== "combo") return null;
+  const half = p.qty / 2;
+  const usedOfType = (p.sessions || []).filter(s => classTypeOf(s.class) === type).length;
+  return half - usedOfType;
+};
+
+// What types of classes does this package allow?
+// Returns an array of types: ["reformer"], ["mat"], ["reformer","mat"], or [] (private/duo/trial)
+const pkgAllowedTypes = (p) => {
+  const key = p.pkgKey;
+  if (key === "reformer") return ["reformer"];
+  if (key === "mat") return ["mat"];
+  if (key === "combo") return ["reformer","mat"];
+  if (key === "visitor") {
+    // Two visitor passes: 3 Reformer (vis_ref) or 3 Mat (vis_mat)
+    if (p.optId === "vis_ref") return ["reformer"];
+    if (p.optId === "vis_mat") return ["mat"];
+    return [];
+  }
+  if (key === "membership") {
+    // Memberships: identify by optId
+    if (p.optId?.startsWith("ref_")) return ["reformer"];
+    if (p.optId?.startsWith("mat_")) return ["mat"];
+    if (p.optId?.startsWith("combo_")) return ["reformer","mat"];
+    return [];
+  }
+  // private, intro — not for group classes
+  return [];
+};
+
+// For monthly memberships: how many classes per week does this plan allow?
+const membershipWeeklyAllowance = (p) => {
+  if (p.pkgKey !== "membership") return null;
+  const id = p.optId || "";
+  if (id === "ref_ul") return Infinity; // unlimited
+  if (id === "ref_1x" || id === "mat_1x") return 1;
+  if (id === "ref_2x" || id === "mat_2x") return 2;
+  if (id === "ref_3x" || id === "mat_3x") return 3;
+  if (id === "combo_m") return 2; // 1 reformer + 1 mat = 2 total per week
+  return null;
+};
+
+// Get the start of the week (Monday 00:00 Lisbon) containing the given Date
+const startOfWeekMonday = (d) => {
+  const dt = new Date(d);
+  dt.setHours(0,0,0,0);
+  const day = dt.getDay(); // 0=Sun..6=Sat
+  const diff = (day === 0 ? -6 : 1 - day); // shift to Monday
+  dt.setDate(dt.getDate() + diff);
+  return dt;
+};
+
+// For a membership package: count how many of its sessions fall in the same week as `targetDate` (a Date object)
+const membershipUsedInWeekOf = (p, targetDate) => {
+  const weekStart = startOfWeekMonday(targetDate);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  return (p.sessions || []).filter(s => {
+    if (!s.bookedTs) return false;
+    return s.bookedTs >= weekStart.getTime() && s.bookedTs < weekEnd.getTime();
+  }).length;
+};
+
+// For combo membership specifically — count usage by type within the target week
+const membershipUsedInWeekOfByType = (p, targetDate, type) => {
+  const weekStart = startOfWeekMonday(targetDate);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+  return (p.sessions || []).filter(s => {
+    if (!s.bookedTs) return false;
+    if (classTypeOf(s.class) !== type) return false;
+    return s.bookedTs >= weekStart.getTime() && s.bookedTs < weekEnd.getTime();
+  }).length;
+};
+
+// Find the best usable package for a given client booking a given class on a given target date.
+// Returns { pkg, reason } where pkg is the package object to use (mutated by caller) or null,
+// and reason is a string indicating why nothing is usable (for the UI message).
+//
+// Rules in order of preference:
+//   1. Package must be PAID
+//   2. Package must allow the class type
+//   3. Package must be within validity
+//   4. Must have sessions left (or weekly allowance not yet hit, for memberships)
+//   5. Prefer non-membership packs (consume class packages first), then memberships
+//      (this keeps class-pass credits from being wasted while memberships renew anyway)
+const findUsablePackage = (pkgs, className, targetDate) => {
+  if (!pkgs || pkgs.length === 0) return { pkg:null, reason:"none" };
+  const type = classTypeOf(className);
+  if (type === "other") return { pkg:null, reason:"none" };
+
+  // Filter to packages that match TYPE (regardless of paid/valid/etc, for diagnostic)
+  const typeMatching = pkgs.filter(p => pkgAllowedTypes(p).includes(type));
+  if (typeMatching.length === 0) return { pkg:null, reason:"wrongType" };
+
+  // Of those, the ones that are PAID
+  const paid = typeMatching.filter(p => p.paid);
+  if (paid.length === 0) return { pkg:null, reason:"notPaid" };
+
+  // Of paid, the ones VALID (not expired)
+  const valid = paid.filter(pkgIsValid);
+  if (valid.length === 0) return { pkg:null, reason:"expired" };
+
+  // Of valid, those that have credit available to use right now
+  const usable = valid.filter(p => {
+    // Memberships: weekly allowance check
+    if (p.pkgKey === "membership") {
+      const allowance = membershipWeeklyAllowance(p);
+      if (allowance === Infinity) return true;
+      // For combo membership, check the per-type counter
+      if (p.optId === "combo_m") {
+        return membershipUsedInWeekOfByType(p, targetDate, type) < 1;
+      }
+      return membershipUsedInWeekOf(p, targetDate) < allowance;
+    }
+    // Combo Mix & Match: check the per-type half
+    if (p.pkgKey === "combo") {
+      const left = comboTypeLeft(p, type);
+      return left > 0;
+    }
+    // Standard packs (reformer, mat, visitor, private, intro)
+    return pkgSessionsLeft(p) > 0;
+  });
+
+  if (usable.length === 0) {
+    // No usable package — could be exhausted pack or weekly limit on membership
+    const anyMembership = valid.some(p => p.pkgKey === "membership");
+    return { pkg:null, reason: anyMembership ? "weekLimit" : "noSessionsLeft" };
+  }
+
+  // Preference: consume non-memberships first (their credits are finite)
+  // Within each group, prefer the one expiring soonest
+  const sortByExpiry = (a,b) => {
+    const ea = pkgExpiryTs(a) ?? Infinity;
+    const eb = pkgExpiryTs(b) ?? Infinity;
+    return ea - eb;
+  };
+  const nonMember = usable.filter(p => p.pkgKey !== "membership").sort(sortByExpiry);
+  const member = usable.filter(p => p.pkgKey === "membership").sort(sortByExpiry);
+  return { pkg: (nonMember[0] || member[0]), reason:"ok" };
+};
 
 // ─────────────────────────────────────────────────────────────────────
 export default function NoaPilates() {
-  // Auth
-  const [users, setUsers] = useState({});  // { email: {name, username, email, phone, password, joinedAt} }
+  // Auth — PERSISTED
+  const [users, setUsers] = useP("users", {});  // { email: {name, username, email, phone, password, joinedAt} }
+  const [resetTokens, setResetTokens] = useP("resetTokens", {});
+  const [adminAccount, setAdminAccount] = useP("adminAccount", null);
+
+  // Auth — session-only
   const [currentUser, setCurrentUser] = useState(null);  // email of logged-in user, or "__admin__"
   const [authMode, setAuthMode] = useState("client"); // "client" | "admin"
   const [authView, setAuthView] = useState("login"); // "login" | "signup" | "forgot" | "reset"
-  const [resetTokens, setResetTokens] = useState({}); // { token: { email, expiresAt } }
   const [resetLink, setResetLink] = useState(""); // shown after request
   const [resetTokenInput, setResetTokenInput] = useState("");
-  const [lang, setLang] = useState("en");
+  const [lang, setLang] = useP("lang", "en");
+  const [darkMode, setDarkMode] = useP("darkMode", false);
+
+  // Apply theme: mutate C so all inline styles using C.* pick up the right palette.
+  Object.assign(C, darkMode ? DARK_C : LIGHT_C);
+
+  // Apply theme to <body> via data-theme attribute, picked up by CSS rules.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.setAttribute("data-theme", darkMode ? "dark" : "light");
+  }, [darkMode]);
 
   // Auth form
   const [fName, setFName] = useState("");
@@ -362,23 +899,100 @@ export default function NoaPilates() {
   const [fPhone, setFPhone] = useState("");
   const [fPassword, setFPassword] = useState("");
   const [fConfirm, setFConfirm] = useState("");
+  const [fBdayDay, setFBdayDay] = useState("");
+  const [fBdayMonth, setFBdayMonth] = useState("");
 
   // App state
   const [tab, setTab] = useState("book");
-  const [adminTab, setAdminTab] = useState("schedule"); // "schedule" | "packages" | "clients"
+  const [adminTab, setAdminTab] = useState("schedule");
   const [selectedDay, setSelectedDay] = useState("Monday");
-  const [bookings, setBookings] = useState({});
-  const [clientPkgs, setClientPkgs] = useState({});
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, max 3 (4 weeks ahead)
+
+  // PERSISTED data
+  const [bookings, setBookings] = useP("bookings", {});
+  const [clientPkgs, setClientPkgs] = useP("clientPkgs", {});
+  const [PACKAGES, setPackages] = useP("packages_config", DEFAULT_PACKAGES);
+  const [SCHEDULE, setSchedule] = useP("schedule_config", DEFAULT_SCHEDULE);
+
+  // Lote 1 — new persisted state
+  const [waitlist, setWaitlist] = useP("waitlist", {});           // { slotKey: [ {email, ts, notified} ] }
+  const [noShows, setNoShows] = useP("noShows", {});               // { "email|slotKey": { date, note } }
+  const [clientNotes, setClientNotes] = useP("clientNotes", {});  // { email: "free text" }
+  // Lote 2 — instructors
+  const [instructors, setInstructors] = useP("instructors", ["Noa"]);
+  // Lote 2 — freezes (paused packages)
+  const [freezes, setFreezes] = useP("freezes", {}); // { pkgId: { startTs, endTs, days, reason } }
+
+  // Admin/UI states (NOT persisted)
+  const [showAdminSettings, setShowAdminSettings] = useState(false);
+
+  // Bonus / extra credits modals (admin)
+  const [showExtraCreditsModal, setShowExtraCreditsModal] = useState(null);
+  const [extraCreditsAmount, setExtraCreditsAmount] = useState("");
+  const [showExtendValidityModal, setShowExtendValidityModal] = useState(null);
+  const [extendDaysAmount, setExtendDaysAmount] = useState("");
+  const [showBonusPkgModal, setShowBonusPkgModal] = useState(false);
+  const [bonusType, setBonusType] = useState("reformer");
+  const [bonusQty, setBonusQty] = useState("");
+  const [bonusValidityDays, setBonusValidityDays] = useState("30");
+
+  // Lote 1 — modal/UI state for new features
+  const [showNotesModal, setShowNotesModal] = useState(false);     // edit notes for viewingClient
+  const [notesDraft, setNotesDraft] = useState("");
+  const [showNoShowConfirm, setShowNoShowConfirm] = useState(null); // { email, slotKey, day, time }
+  const [pendingWaitlistOffer, setPendingWaitlistOffer] = useState(null); // { day, time } when client should confirm
+
+  // Schedule editing
+  const [showScheduleEditor, setShowScheduleEditor] = useState(null);
+  const [scheduleEditDay, setScheduleEditDay] = useState("Monday");
+  const [scheduleEditTime, setScheduleEditTime] = useState("");
+  const [scheduleEditName, setScheduleEditName] = useState("Reformer");
+  const [scheduleEditTag, setScheduleEditTag] = useState("");
+  const [scheduleEditInstructor, setScheduleEditInstructor] = useState("");
+
+  // Instructors modal
+  const [showInstructorsModal, setShowInstructorsModal] = useState(false);
+  const [newInstructorName, setNewInstructorName] = useState("");
+
+  // Freeze modal
+  const [showFreezeModal, setShowFreezeModal] = useState(null); // pkgId or null
+  const [freezeDays, setFreezeDays] = useState("");
+  const [freezeReason, setFreezeReason] = useState("");
+
+  // Recurring booking modal
+  const [showRecurringModal, setShowRecurringModal] = useState(null); // {day, slot} or null
+  const [recurringWeeks, setRecurringWeeks] = useState(2);
+
+  // Edit profile modal (client)
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [epName, setEpName] = useState("");
+  const [epPhone, setEpPhone] = useState("");
+  const [epBdayDay, setEpBdayDay] = useState("");
+  const [epBdayMonth, setEpBdayMonth] = useState("");
+  const [epCurrentPwd, setEpCurrentPwd] = useState("");
+  const [epNewPwd, setEpNewPwd] = useState("");
+  const [epConfirmPwd, setEpConfirmPwd] = useState("");
 
   const [showPkgModal, setShowPkgModal] = useState(false);
   const [pkgStep, setPkgStep] = useState(1);
   const [selPkgKey, setSelPkgKey] = useState("reformer");
   const [selOptId, setSelOptId] = useState("ref_10");
   const [selClientForPkg, setSelClientForPkg] = useState("");
-  const [viewingClient, setViewingClient] = useState(null); // email
-  const [adminResetLink, setAdminResetLink] = useState(""); // link generated by admin
+  const [viewingClient, setViewingClient] = useState(null);
+  const [adminResetLink, setAdminResetLink] = useState("");
   const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
   const [adminNewPassword, setAdminNewPassword] = useState("");
+
+  // Auto-save persisted state whenever it changes
+  useEffect(() => {
+    saveState({
+      users, resetTokens, adminAccount, lang,
+      bookings, clientPkgs,
+      packages_config: PACKAGES, schedule_config: SCHEDULE,
+      waitlist, noShows, clientNotes,
+      instructors, freezes,
+    });
+  }, [users, resetTokens, adminAccount, lang, bookings, clientPkgs, PACKAGES, SCHEDULE, waitlist, noShows, clientNotes, instructors, freezes]);
 
   const [toast, setToast] = useState(null);
   const t = T[lang];
@@ -398,12 +1012,18 @@ export default function NoaPilates() {
   }, []);
 
   // Helpers
-  const slotKey = (day,time) => `${day}-${time}`;
-  const spotsLeft = (day,time) => {
-    const s = SCHEDULE[day]?.find(x=>x.time===time);
-    return MAX_SPOTS(s?.name||"") - ((bookings[slotKey(day,time)]||[]).length);
+  // slotKey identifies a class instance by its CALENDAR DATE.
+  // If dateOverride is null, defaults to next occurrence of `day`.
+  // Format: `YYYY-MM-DD|HH:MM`
+  const slotKey = (day, time, dateOverride = null) => {
+    const d = dateOverride instanceof Date ? dateOverride : nextOccurrenceOfDay(day);
+    return `${isoDate(d)}|${time}`;
   };
-  const isBookedBy = (day,time,email) => (bookings[slotKey(day,time)]||[]).some(b=>b.email===email);
+  const spotsLeft = (day,time,dateOverride=null) => {
+    const s = SCHEDULE[day]?.find(x=>x.time===time);
+    return MAX_SPOTS(s?.name||"") - ((bookings[slotKey(day,time,dateOverride)]||[]).length);
+  };
+  const isBookedBy = (day,time,email,dateOverride=null) => (bookings[slotKey(day,time,dateOverride)]||[]).some(b=>b.email===email);
   const myPkgsFor = (email) => clientPkgs[email]||[];
   const activePkgFor = (email) => myPkgsFor(email).find(p=>p.qty?p.sessions.length<p.qty:true);
   const getOpts = key => { const p=PACKAGES[key]; return p.groups?p.groups.flatMap(g=>g.opts):(p.opts||[]); };
@@ -414,6 +1034,7 @@ export default function NoaPilates() {
   // Auth actions
   const resetForm = () => {
     setFName(""); setFUsername(""); setFEmail(""); setFPhone(""); setFPassword(""); setFConfirm("");
+    setFBdayDay(""); setFBdayMonth("");
   };
 
   const doSignUp = () => {
@@ -426,6 +1047,8 @@ export default function NoaPilates() {
     const newUser = {
       name:fName.trim(), username:fUsername.trim(), email, phone:fPhone.trim(),
       password:fPassword, joinedAt:fmt(lisbonNow()),
+      bdayDay: fBdayDay ? parseInt(fBdayDay,10) : null,
+      bdayMonth: fBdayMonth ? parseInt(fBdayMonth,10) : null,
     };
     setUsers(prev=>({...prev,[email]:newUser}));
     setCurrentUser(email);
@@ -475,37 +1098,514 @@ export default function NoaPilates() {
   };
 
   const doAdminLogin = () => {
-    if (fEmail.trim().toLowerCase() === ADMIN_EMAIL && fPassword === ADMIN_PASSWORD) {
+    const email = fEmail.trim().toLowerCase();
+    if (!adminAccount) {
+      // First-time setup — register the admin account
+      if (!email || !fPassword) { fire(t.fillAllFields,"warn"); return; }
+      if (fPassword.length < 4) { fire(t.passwordMinLength,"warn"); return; }
+      if (fPassword !== fConfirm) { fire(t.passwordsMatch,"warn"); return; }
+      setAdminAccount({ email, password: fPassword });
       setCurrentUser("__admin__");
-      fire("Admin logged in ✓");
+      fire(lang==="pt"?"Conta admin criada! ✓":"Admin account created! ✓");
+      resetForm();
+      return;
+    }
+    // Subsequent logins
+    if (email === adminAccount.email && fPassword === adminAccount.password) {
+      setCurrentUser("__admin__");
+      fire("Admin ✓");
       resetForm();
     } else {
       fire(t.invalidAdmin,"warn");
     }
   };
 
+  // Admin: update own credentials
+  const updateAdminCredentials = (newEmail, currentPassword, newPassword) => {
+    if (!adminAccount) return;
+    if (currentPassword !== adminAccount.password) {
+      fire(lang==="pt"?"Palavra-passe atual incorreta":"Current password incorrect","warn"); return;
+    }
+    const updates = { ...adminAccount };
+    if (newEmail && newEmail.trim().toLowerCase() !== updates.email) {
+      updates.email = newEmail.trim().toLowerCase();
+    }
+    if (newPassword) {
+      if (newPassword.length < 4) { fire(t.passwordMinLength,"warn"); return; }
+      updates.password = newPassword;
+    }
+    setAdminAccount(updates);
+    fire(lang==="pt"?"Dados admin atualizados ✓":"Admin updated ✓");
+  };
+
   const doLogout = () => { setCurrentUser(null); resetForm(); setAuthMode("client"); setAuthView("login"); };
 
+  // Client: edit own profile
+  const openEditProfile = () => {
+    setEpName(me?.name || "");
+    setEpPhone(me?.phone || "");
+    setEpBdayDay(me?.bdayDay ? String(me.bdayDay) : "");
+    setEpBdayMonth(me?.bdayMonth ? String(me.bdayMonth) : "");
+    setEpCurrentPwd(""); setEpNewPwd(""); setEpConfirmPwd("");
+    setShowEditProfile(true);
+  };
+  const saveEditProfile = () => {
+    if (!epName.trim()) { fire(t.fillAllFields,"warn"); return; }
+    const updates = {
+      ...users[currentUser],
+      name: epName.trim(),
+      phone: epPhone.trim(),
+      bdayDay: epBdayDay ? parseInt(epBdayDay,10) : null,
+      bdayMonth: epBdayMonth ? parseInt(epBdayMonth,10) : null,
+    };
+    if (epNewPwd) {
+      if (epCurrentPwd !== users[currentUser].password) {
+        fire(lang==="pt"?"Palavra-passe atual incorreta":"Current password incorrect","warn"); return;
+      }
+      if (epNewPwd.length < 4) { fire(t.passwordMinLength,"warn"); return; }
+      if (epNewPwd !== epConfirmPwd) { fire(t.passwordsMatch,"warn"); return; }
+      updates.password = epNewPwd;
+    }
+    setUsers(prev=>({...prev,[currentUser]:updates}));
+    setShowEditProfile(false);
+    fire(lang==="pt"?"Perfil atualizado ✓":"Profile updated ✓");
+  };
+
+  // Admin: schedule editing
+  const upsertSlot = () => {
+    if (!scheduleEditTime.trim() || !scheduleEditName.trim()) { fire(t.fillAllFields,"warn"); return; }
+    const newSlot = { time: scheduleEditTime.trim(), name: scheduleEditName.trim(), tag: scheduleEditTag.trim() || null, instructor: scheduleEditInstructor || null };
+    setSchedule(prev => {
+      const next = { ...prev };
+      if (showScheduleEditor === "new") {
+        next[scheduleEditDay] = [...(next[scheduleEditDay]||[]), newSlot].sort((a,b)=>a.time.localeCompare(b.time));
+      } else if (showScheduleEditor && typeof showScheduleEditor === "object") {
+        const { day, idx } = showScheduleEditor;
+        next[day] = next[day].map((s,i)=>i===idx?newSlot:s).sort((a,b)=>a.time.localeCompare(b.time));
+      }
+      return next;
+    });
+    setShowScheduleEditor(null);
+    fire(lang==="pt"?"Aula atualizada ✓":"Class saved ✓");
+  };
+  const deleteSlot = (day, idx) => {
+    if (!confirm(lang==="pt"?"Apagar esta aula? As marcações existentes serão mantidas.":"Delete this class? Existing bookings stay.")) return;
+    setSchedule(prev => {
+      const next = { ...prev };
+      next[day] = next[day].filter((_,i)=>i!==idx);
+      return next;
+    });
+    fire(lang==="pt"?"Aula removida":"Class removed","warn");
+  };
+
+  // Admin: edit package option price/label
+  const updatePackageOption = (pkgKey, optId, field, value) => {
+    setPackages(prev => {
+      const next = { ...prev };
+      const cat = { ...next[pkgKey] };
+      if (cat.groups) {
+        cat.groups = cat.groups.map(g => ({
+          ...g,
+          opts: g.opts.map(o => o.id === optId ? { ...o, [field]: value } : o),
+        }));
+      } else if (cat.opts) {
+        cat.opts = cat.opts.map(o => o.id === optId ? { ...o, [field]: value } : o);
+      }
+      next[pkgKey] = cat;
+      return next;
+    });
+  };
+
   // Booking
-  const bookClass = (day,slot) => {
+  const bookClass = (day,slot,targetDate=null) => {
+    const d = targetDate || nextOccurrenceOfDay(day);
     if (!isAdmin && !isOpen(day,slot.time)) { fire(t.bookingClosed,"warn"); return; }
-    if (spotsLeft(day,slot.time)<=0) { fire(t.classFull,"warn"); return; }
-    if (isBookedBy(day,slot.time,currentUser)) { fire(t.alreadyBooked,"warn"); return; }
-    setBookings(prev=>({...prev,[slotKey(day,slot.time)]:[...(prev[slotKey(day,slot.time)]||[]),{email:currentUser,ts:new Date().toISOString()}]}));
-    const pkg = activePkgFor(currentUser);
-    if (pkg) {
-      setClientPkgs(prev=>({...prev,[currentUser]:prev[currentUser].map(p=>p.id===pkg.id?{...p,sessions:[...p.sessions,{id:Date.now(),date:fmt(lisbonNow()),class:slot.name,time:slot.time,day}]}:p)}));
-      fire(`${t.bookedAnd} ${PACKAGES[pkg.pkgKey]?.label} ✓`);
+    if (spotsLeft(day,slot.time,d)<=0) { fire(t.classFull,"warn"); return; }
+    if (isBookedBy(day,slot.time,currentUser,d)) { fire(t.alreadyBooked,"warn"); return; }
+    const sk = slotKey(day, slot.time, d);
+    const dateStr = isoDate(d);
+
+    // ADMIN bypasses all credit checks (can book anyone freely)
+    if (!isAdmin) {
+      const userPkgs = myPkgsFor(currentUser);
+      const { pkg: usable, reason } = findUsablePackage(userPkgs, slot.name, d);
+      if (!usable) {
+        if (reason === "none") fire(t.noCreditDesc,"warn");
+        else if (reason === "wrongType") fire(t.noCreditForType,"warn");
+        else if (reason === "notPaid") fire(t.pkgNotPaid,"warn");
+        else if (reason === "expired") fire(t.pkgExpired,"warn");
+        else if (reason === "weekLimit") fire(t.pkgWeeklyLimit,"warn");
+        else if (reason === "noSessionsLeft") fire(t.pkgNoSessionsLeft,"warn");
+        else fire(t.noCreditDesc,"warn");
+        return;
+      }
+      // Register the booking
+      setBookings(prev=>({...prev,[sk]:[...(prev[sk]||[]),{email:currentUser,ts:new Date().toISOString(),classDate:dateStr}]}));
+      // Log session into the chosen package
+      setClientPkgs(prev=>({...prev,[currentUser]:prev[currentUser].map(p=>p.id===usable.id?{...p,sessions:[...p.sessions,{id:Date.now(),date:fmt(d),class:slot.name,time:slot.time,day,classDate:dateStr,bookedTs:d.getTime()}]}:p)}));
+      fire(`${t.bookedAnd} ${PACKAGES[usable.pkgKey]?.label} ✓`);
+      return;
+    }
+
+    // ADMIN PATH — book without credit check
+    setBookings(prev=>({...prev,[sk]:[...(prev[sk]||[]),{email:currentUser,ts:new Date().toISOString(),classDate:dateStr}]}));
+    fire(`${slot.time} ${slot.name} ${lang==="pt"?"marcado!":"booked!"}`);
+  };
+
+  // Book the same class for N upcoming weeks. Validates each week independently.
+  const bookRecurring = (day, slot, weeks) => {
+    if (!weeks || weeks <= 0) return;
+    let booked = 0, skipped = 0;
+    // Compute target dates: starting from current weekOffset, then +1, +2, ...
+    const occurrences = [];
+    for (let w = 0; w < weeks; w++) {
+      occurrences.push(dateForDayInWeek(day, weekOffset + w));
+    }
+
+    // Build new state mutations locally then commit at the end (avoids stale state in loops).
+    const newBookings = {...bookings};
+    const newClientPkgs = {...clientPkgs};
+
+    for (const occDate of occurrences) {
+      const sk = slotKey(day, slot.time, occDate);
+      const dateStr = isoDate(occDate);
+      // Already booked?
+      const existing = (newBookings[sk]||[]).find(b => b.email === currentUser);
+      if (existing) { skipped++; continue; }
+      // Spots available?
+      if ((newBookings[sk]||[]).length >= MAX_SPOTS(slot.name)) { skipped++; continue; }
+      // Credit check
+      const userPkgs = (newClientPkgs[currentUser]||[]);
+      const { pkg: usable } = findUsablePackage(userPkgs, slot.name, occDate);
+      if (!usable) { skipped++; continue; }
+      // Apply booking
+      newBookings[sk] = [...(newBookings[sk]||[]), {email: currentUser, ts: new Date().toISOString(), classDate: dateStr}];
+      newClientPkgs[currentUser] = userPkgs.map(p => p.id === usable.id
+        ? {...p, sessions: [...(p.sessions||[]), {id: Date.now()+Math.random(), date: fmt(occDate), class: slot.name, time: slot.time, day, classDate: dateStr, bookedTs: occDate.getTime()}]}
+        : p);
+      booked++;
+    }
+
+    setBookings(newBookings);
+    setClientPkgs(newClientPkgs);
+    setShowRecurringModal(null);
+
+    if (booked > 0) {
+      fire(`✓ ${booked} ${booked===1?t.weekN:t.weeksN} ${t.recurringResult}${skipped>0?` · ${skipped} ${t.recurringSkipped}`:""}`);
     } else {
-      fire(`${slot.time} ${slot.name} ${lang==="pt"?"marcado!":"booked!"}`);
+      fire(t.recurringSkipped, "warn");
     }
   };
 
-  const cancelBooking = (day,time,email=currentUser) => {
+  const cancelBooking = (day,time,email=currentUser,dateOverride=null) => {
+    const d = dateOverride || nextOccurrenceOfDay(day);
     if (!isAdmin && !isOpen(day,time)) { fire(t.cancellationClosed,"warn"); return; }
-    setBookings(prev=>({...prev,[slotKey(day,time)]:(prev[slotKey(day,time)]||[]).filter(b=>b.email!==email)}));
+    const sk = slotKey(day,time,d);
+    const dateStr = isoDate(d);
+    // Remove from bookings
+    setBookings(prev=>({...prev,[sk]:(prev[sk]||[]).filter(b=>b.email!==email)}));
+    // Return credit: remove the matching session entry from the user's packages
+    setClientPkgs(prev=>{
+      const userList = prev[email];
+      if (!userList) return prev;
+      let removed = false;
+      const newList = userList.map(p=>{
+        if (removed) return p;
+        // Match by classDate when present; fallback to day+time for legacy entries
+        const idx = (p.sessions||[]).findIndex(s =>
+          (s.classDate ? s.classDate === dateStr && s.time===time : s.day===day && s.time===time)
+        );
+        if (idx === -1) return p;
+        removed = true;
+        const newSessions = [...p.sessions];
+        newSessions.splice(idx,1);
+        return {...p, sessions:newSessions};
+      });
+      return {...prev, [email]:newList};
+    });
+    // Notify the next person on the waitlist (if any).
+    setWaitlist(prev => {
+      const queue = prev[sk] || [];
+      if (queue.length === 0) return prev;
+      if (queue[0].notified) return prev;
+      const next = { ...queue[0], notified: true, notifiedTs: Date.now() };
+      return { ...prev, [sk]: [next, ...queue.slice(1)] };
+    });
     fire(t.bookingCancelled,"warn");
   };
+
+  // ── WAITLIST ──────────────────────────────────────────────────────
+  // When someone is notified that a spot is available, they have this much time to confirm
+  // before the offer expires and the next person gets notified.
+  const WAITLIST_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+  // Process every waitlist slot to:
+  //  - Detect expired notifications (notifiedTs + WAITLIST_TIMEOUT_MS < now)
+  //  - Remove the expired person from the queue
+  //  - Notify the next person in line
+  // Runs whenever app loads/state changes; idempotent (safe to call repeatedly).
+  const processWaitlistTimeouts = () => {
+    const now = Date.now();
+    let anyChange = false;
+    setWaitlist(prev => {
+      const next = {};
+      for (const [sk, queue] of Object.entries(prev || {})) {
+        if (!queue || queue.length === 0) { next[sk] = queue; continue; }
+        let q = [...queue];
+        // Cascade through expired notifications: if head expired, drop and notify the next
+        while (q.length > 0 && q[0].notified && q[0].notifiedTs && (q[0].notifiedTs + WAITLIST_TIMEOUT_MS) < now) {
+          q.shift(); // drop expired head
+          anyChange = true;
+          if (q.length > 0) {
+            // Notify the new head
+            q[0] = { ...q[0], notified: true, notifiedTs: now };
+          }
+        }
+        next[sk] = q;
+      }
+      return anyChange ? next : prev;
+    });
+  };
+
+  // Run on mount and again every minute while app is open, so timeouts fire even if
+  // the user just sits on the page for a long time.
+  useEffect(() => {
+    processWaitlistTimeouts(); // immediate on load
+    const interval = setInterval(processWaitlistTimeouts, 60 * 1000); // every 1 min
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const joinWaitlist = (day, time, dateOverride=null) => {
+    const sk = slotKey(day, time, dateOverride);
+    setWaitlist(prev => {
+      const queue = prev[sk] || [];
+      if (queue.find(w => w.email === currentUser)) {
+        fire(lang==="pt"?"Já estás na lista de espera":"Already on the waitlist","warn");
+        return prev;
+      }
+      const newEntry = { email: currentUser, ts: Date.now(), notified: false };
+      return { ...prev, [sk]: [...queue, newEntry] };
+    });
+    fire(lang==="pt"?"Adicionado à lista de espera ✓":"Added to waitlist ✓");
+  };
+
+  const leaveWaitlist = (day, time, email = currentUser, dateOverride=null) => {
+    const sk = slotKey(day, time, dateOverride);
+    setWaitlist(prev => {
+      const queue = prev[sk] || [];
+      const wasNotifiedHead = queue[0]?.email === email && queue[0]?.notified;
+      const filtered = queue.filter(w => w.email !== email);
+      if (wasNotifiedHead && filtered.length > 0) {
+        filtered[0] = { ...filtered[0], notified: true, notifiedTs: Date.now() };
+      }
+      return { ...prev, [sk]: filtered };
+    });
+    fire(lang==="pt"?"Removido da lista":"Removed from waitlist","warn");
+  };
+
+  const myWaitlistEntry = (day, time, dateOverride=null) => {
+    const sk = slotKey(day, time, dateOverride);
+    return (waitlist[sk] || []).find(w => w.email === currentUser) || null;
+  };
+
+  const waitlistTimeLeft = (day, time, email, dateOverride=null) => {
+    const sk = slotKey(day, time, dateOverride);
+    const queue = waitlist[sk] || [];
+    const entry = queue.find(w => w.email === email);
+    if (!entry || !entry.notified || !entry.notifiedTs) return null;
+    const remaining = (entry.notifiedTs + WAITLIST_TIMEOUT_MS) - Date.now();
+    return remaining > 0 ? remaining : 0;
+  };
+
+  // Format the time left in a friendly way: "1h 23m" or "45m" or "expired"
+  const formatTimeLeft = (ms) => {
+    if (ms == null) return "";
+    if (ms <= 0) return lang==="pt" ? "expirado" : "expired";
+    const totalMin = Math.ceil(ms / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  };
+
+  const acceptWaitlistOffer = (day, time, dateOverride=null) => {
+    const d = dateOverride || nextOccurrenceOfDay(day);
+    const sk = slotKey(day, time, d);
+    const dateStr = isoDate(d);
+    const slot = (SCHEDULE[day]||[]).find(s=>s.time===time);
+    if (!slot) { fire("Class not found","warn"); return; }
+    const tl = waitlistTimeLeft(day, time, currentUser, d);
+    if (tl != null && tl <= 0) {
+      fire(lang==="pt"?"O tempo para confirmar expirou":"Confirmation time expired","warn");
+      processWaitlistTimeouts();
+      return;
+    }
+    if (spotsLeft(day, time, d) <= 0) {
+      fire(lang==="pt"?"Já não há lugares":"No spots available anymore","warn");
+      setWaitlist(prev => ({...prev, [sk]: (prev[sk] || []).filter(w => w.email !== currentUser)}));
+      return;
+    }
+    const userPkgs = myPkgsFor(currentUser);
+    const { pkg: usable, reason } = findUsablePackage(userPkgs, slot.name, d);
+    if (!usable) {
+      fire(reason==="notPaid"?t.pkgNotPaid:reason==="expired"?t.pkgExpired:t.noCreditDesc,"warn");
+      return;
+    }
+    setBookings(prev => ({...prev, [sk]: [...(prev[sk]||[]), {email: currentUser, ts: new Date().toISOString(), classDate: dateStr}]}));
+    setClientPkgs(prev => ({...prev, [currentUser]: prev[currentUser].map(p => p.id === usable.id ? {...p, sessions: [...p.sessions, {id:Date.now(), date:fmt(d), class:slot.name, time:slot.time, day, classDate:dateStr, bookedTs:d.getTime()}]} : p)}));
+    setWaitlist(prev => ({...prev, [sk]: (prev[sk] || []).filter(w => w.email !== currentUser)}));
+    setPendingWaitlistOffer(null);
+    fire(`✓ ${slot.time} ${slot.name} ${lang==="pt"?"marcada!":"booked!"}`);
+  };
+
+  const adminAddBooking = (day, time, email, dateOverride=null) => {
+    const d = dateOverride || nextOccurrenceOfDay(day);
+    const sk = slotKey(day, time, d);
+    const dateStr = isoDate(d);
+    if (isBookedBy(day, time, email, d)) { fire(t.alreadyBookedOrFull, "warn"); return; }
+    if (spotsLeft(day, time, d) <= 0) { fire(t.alreadyBookedOrFull, "warn"); return; }
+
+    const queue = waitlist[sk] || [];
+    const isCuttingLine = queue.length > 0 && !queue.find(w => w.email === email);
+    if (isCuttingLine) {
+      const msg = lang==="pt"
+        ? `⚠️ Há ${queue.length} pessoa${queue.length>1?"s":""} na lista de espera para esta aula.\n\nAdicionar ${getUserName(email)} mesmo assim?\n\n(As pessoas em fila não serão avisadas.)`
+        : `⚠️ There ${queue.length>1?"are":"is"} ${queue.length} person${queue.length>1?"s":""} on the waitlist for this class.\n\nAdd ${getUserName(email)} anyway?\n\n(Waitlist members won't be notified.)`;
+      if (!confirm(msg)) return;
+    }
+
+    const bookingEntry = { email, ts: new Date().toISOString(), byAdmin: true, priorWaitlistCount: queue.length, classDate: dateStr };
+    setBookings(prev => ({...prev, [sk]: [...(prev[sk]||[]), bookingEntry]}));
+
+    if (queue.find(w => w.email === email)) {
+      setWaitlist(prev => {
+        const q = prev[sk] || [];
+        const wasNotifiedHead = q[0]?.email === email && q[0]?.notified;
+        const filtered = q.filter(w => w.email !== email);
+        if (wasNotifiedHead && filtered.length > 0) {
+          filtered[0] = { ...filtered[0], notified: true, notifiedTs: Date.now() };
+        }
+        return { ...prev, [sk]: filtered };
+      });
+    }
+
+    if (isCuttingLine) {
+      fire(`${getUserName(email)} ${t.addedTo} ${time} (${lang==="pt"?"à frente de":"ahead of"} ${queue.length})`,"warn");
+    } else {
+      fire(`${getUserName(email)} ${t.addedTo} ${time}`);
+    }
+  };
+
+  // ── NO-SHOW ───────────────────────────────────────────────────────
+  const markNoShow = (email, day, time, note="", dateOverride=null) => {
+    const d = dateOverride || nextOccurrenceOfDay(day);
+    const sk = slotKey(day, time, d);
+    const key = `${email}|${sk}`;
+    setNoShows(prev => ({...prev, [key]: { date: fmt(d), day, time, note, classDate: isoDate(d) }}));
+    fire(lang==="pt"?"No-show registado":"No-show recorded","warn");
+  };
+  const unmarkNoShow = (email, day, time, dateOverride=null) => {
+    const d = dateOverride || nextOccurrenceOfDay(day);
+    const sk = slotKey(day, time, d);
+    const key = `${email}|${sk}`;
+    setNoShows(prev => {
+      const next = {...prev};
+      delete next[key];
+      return next;
+    });
+    fire(lang==="pt"?"Removido":"Removed");
+  };
+  const isNoShow = (email, day, time, dateOverride=null) => {
+    return !!noShows[`${email}|${slotKey(day,time,dateOverride)}`];
+  };
+  const noShowsFor = (email) => {
+    return Object.entries(noShows)
+      .filter(([k]) => k.startsWith(`${email}|`))
+      .map(([k, v]) => v);
+  };
+
+  // ── PRIVATE NOTES (admin only) ────────────────────────────────────
+  const saveClientNote = (email, text) => {
+    setClientNotes(prev => ({...prev, [email]: text}));
+    fire(lang==="pt"?"Notas guardadas":"Notes saved");
+  };
+
+  // ── BIRTHDAY HELPERS ───────────────────────────────────────────────
+  const isBirthdayToday = (u) => {
+    if (!u?.bdayDay || !u?.bdayMonth) return false;
+    const now = lisbonNow();
+    return now.getDate() === u.bdayDay && (now.getMonth()+1) === u.bdayMonth;
+  };
+  const daysUntilBday = (u) => {
+    if (!u?.bdayDay || !u?.bdayMonth) return null;
+    const now = lisbonNow();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let next = new Date(now.getFullYear(), u.bdayMonth-1, u.bdayDay);
+    if (next < todayMidnight) {
+      next = new Date(now.getFullYear()+1, u.bdayMonth-1, u.bdayDay);
+    }
+    return Math.round((next - todayMidnight) / (24*60*60*1000));
+  };
+  const upcomingBirthdays = (withinDays = 30) => {
+    return Object.values(users)
+      .filter(u => u.bdayDay && u.bdayMonth)
+      .map(u => ({...u, daysUntil: daysUntilBday(u)}))
+      .filter(u => u.daysUntil != null && u.daysUntil <= withinDays)
+      .sort((a,b) => a.daysUntil - b.daysUntil);
+  };
+
+  // ── INSTRUCTORS ────────────────────────────────────────────────────
+  const addInstructor = (name) => {
+    const trimmed = (name||"").trim();
+    if (!trimmed) return;
+    if (instructors.includes(trimmed)) { fire(lang==="pt"?"Já existe":"Already exists","warn"); return; }
+    setInstructors(prev => [...prev, trimmed]);
+    setNewInstructorName("");
+    fire(`+ ${trimmed} ✓`);
+  };
+  const removeInstructor = (name) => {
+    if (!confirm(lang==="pt"?`Remover ${name}? Aulas associadas ficam sem instrutora.`:`Remove ${name}? Classes will lose their instructor.`)) return;
+    setInstructors(prev => prev.filter(i => i !== name));
+    setSchedule(prev => {
+      const next = {...prev};
+      for (const day of Object.keys(next)) {
+        next[day] = (next[day]||[]).map(slot => slot.instructor === name ? {...slot, instructor: null} : slot);
+      }
+      return next;
+    });
+    fire(`- ${name}`,"warn");
+  };
+
+  // ── FREEZE / PAUSA DE PACOTE ──────────────────────────────────────
+  // Freezing extends the package validity by the same number of days,
+  // so the user keeps the days they had when the freeze started.
+  const freezePackage = (email, pkgId, days, reason="") => {
+    if (!days || days <= 0) { fire(lang==="pt"?"Insere um número válido":"Enter a valid number","warn"); return; }
+    const now = Date.now();
+    const endTs = now + days*24*60*60*1000;
+    setFreezes(prev => ({...prev, [pkgId]: { startTs: now, endTs, days, reason, email }}));
+    setClientPkgs(prev => ({...prev, [email]: (prev[email]||[]).map(p =>
+      p.id === pkgId ? {...p, extraValidityDays: (p.extraValidityDays||0) + days} : p
+    )}));
+    fire(`❄️ ${lang==="pt"?"Pacote pausado":"Package frozen"} ✓`);
+  };
+  const unfreezePackage = (email, pkgId) => {
+    const f = freezes[pkgId];
+    if (!f) return;
+    setFreezes(prev => {
+      const next = {...prev};
+      delete next[pkgId];
+      return next;
+    });
+    fire(`☀️ ${lang==="pt"?"Pacote despausado":"Package unfrozen"} ✓`);
+  };
+  const isFrozen = (pkgId) => {
+    const f = freezes[pkgId];
+    if (!f) return false;
+    return Date.now() < f.endTs;
+  };
+  const freezeInfo = (pkgId) => freezes[pkgId];
 
   // Packages
   const addPackage = () => {
@@ -517,8 +1617,69 @@ export default function NoaPilates() {
   };
 
   const markPaid = (email,pkgId) => {
-    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>p.id===pkgId?{...p,paid:true,paidDate:fmt(lisbonNow())}:p)}));
+    const now = lisbonNow();
+    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>p.id===pkgId?{...p,paid:true,paidDate:fmt(now),paidTs:now.getTime()}:p)}));
     fire(t.paymentMarked);
+  };
+
+  // Admin: unmark a payment (e.g. mistake correction)
+  const unmarkPaid = (email,pkgId) => {
+    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>p.id===pkgId?{...p,paid:false,paidDate:null,paidTs:null}:p)}));
+    fire(lang==="pt"?"Pagamento removido":"Payment unmarked","warn");
+  };
+
+  // Admin: add extra credits to an existing package (e.g. bonus)
+  const addExtraCredits = (email,pkgId,extra) => {
+    if (!extra || extra <= 0) { fire(lang==="pt"?"Insere um número válido":"Enter a valid number","warn"); return; }
+    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>{
+      if (p.id !== pkgId) return p;
+      // For packages with a qty, increase qty. For packages without (memberships), adjust an "extraSessions" counter.
+      if (p.qty != null) return {...p, qty: p.qty + extra};
+      return {...p, extraSessions: (p.extraSessions||0) + extra};
+    })}));
+    fire(`+${extra} ${lang==="pt"?"créditos adicionados":"credits added"} ✓`);
+  };
+
+  // Admin: extend validity by N days (used for "give back expired credits" or just extend)
+  const extendValidity = (email,pkgId,days) => {
+    if (!days || days <= 0) { fire(lang==="pt"?"Insere um número válido de dias":"Enter a valid number of days","warn"); return; }
+    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>p.id===pkgId?{...p,extraValidityDays:(p.extraValidityDays||0)+days}:p)}));
+    fire(`+${days} ${lang==="pt"?"dias adicionados":"days added"} ✓`);
+  };
+
+  // Admin: grant a free bonus package (with custom validity in days)
+  const grantBonusPackage = (email, classType, qty, validityDays) => {
+    if (!qty || qty <= 0) { fire(lang==="pt"?"Insere um número válido":"Enter a valid number","warn"); return; }
+    const now = lisbonNow();
+    // Pick a parent package key for type/styling
+    const pkgKey = classType === "reformer" ? "reformer" : classType === "mat" ? "mat" : "combo";
+    const optId = `bonus_${classType}_${Date.now()}`;
+    const validityStr = validityDays && validityDays > 0
+      ? `${validityDays} day${validityDays>1?"s":""}`
+      : null;
+    const bonusEntry = {
+      id: Date.now()+Math.random(),
+      pkgKey,
+      optId,
+      label: `🎁 ${lang==="pt"?"Bónus":"Bonus"}: ${qty} ${classType === "reformer" ? "Reformer" : classType === "mat" ? "Mat" : "Combo"}`,
+      qty,
+      price: 0,
+      validity: validityStr,
+      note: lang==="pt"?"Cortesia do estúdio":"Studio courtesy",
+      paid: true,
+      paidDate: fmt(now),
+      paidTs: now.getTime(),
+      startDate: fmt(now),
+      purchaseTs: now.getTime(),
+      sessions: [],
+      isBonus: true,
+    };
+    // For combo bonuses, force qty to be split equally (must be even)
+    if (classType === "combo" && qty % 2 !== 0) {
+      bonusEntry.qty = qty - (qty%2); // make even
+    }
+    setClientPkgs(prev=>({...prev, [email]:[...(prev[email]||[]), bonusEntry]}));
+    fire(`🎁 ${lang==="pt"?"Bónus atribuído":"Bonus granted"} ✓`);
   };
 
   const removePkg = (email,pkgId) => {
@@ -556,6 +1717,7 @@ export default function NoaPilates() {
     <div style={S.root}>
       {toast&&<div style={S.toastStyle(toast.type)}>{toast.msg}</div>}
       <div style={S.splash}>
+        <button onClick={()=>setDarkMode(d=>!d)} style={{position:"absolute",top:14,right:14,background:"none",border:"none",fontSize:18,cursor:"pointer",padding:6}} title={darkMode?t.lightMode:t.darkMode}>{darkMode?"☀️":"🌙"}</button>
         <div style={S.splashLogo}>
           <NoaLogo size={140} color="#9a6070"/>
           <div style={{fontSize:13,letterSpacing:8,color:"#9a6070",marginTop:6,fontFamily:"Georgia,serif"}}>PILATES</div>
@@ -584,10 +1746,24 @@ export default function NoaPilates() {
         <div style={S.splashCard}>
           {authMode==="admin" ? (
             <>
-              <h3 style={{margin:"0 0 14px",fontSize:16,color:C.wine,textAlign:"center",fontFamily:"Georgia,serif"}}>{t.adminLogin}</h3>
+              <h3 style={{margin:"0 0 14px",fontSize:16,color:C.wine,textAlign:"center",fontFamily:"Georgia,serif"}}>
+                {adminAccount ? t.adminLogin : (lang==="pt"?"Configurar Admin":"Admin Setup")}
+              </h3>
+              {!adminAccount && (
+                <p style={{margin:"-8px 0 12px",fontSize:11,color:C.textLight,textAlign:"center",lineHeight:1.5}}>
+                  {lang==="pt"
+                    ? "Primeira utilização. Cria a conta de administrador. Esta operação só pode ser feita uma vez."
+                    : "First-time setup. Create the admin account. This can only be done once."}
+                </p>
+              )}
               <input value={fEmail} onChange={e=>setFEmail(e.target.value)} placeholder={t.adminEmail} style={S.input} type="email"/>
-              <input value={fPassword} onChange={e=>setFPassword(e.target.value)} placeholder={t.adminPassword} style={S.input} type="password" onKeyDown={e=>e.key==="Enter"&&doAdminLogin()}/>
-              <button onClick={doAdminLogin} style={S.wineBtn}>{t.enter}</button>
+              <input value={fPassword} onChange={e=>setFPassword(e.target.value)} placeholder={t.adminPassword} style={S.input} type="password" onKeyDown={e=>e.key==="Enter"&&adminAccount&&doAdminLogin()}/>
+              {!adminAccount && (
+                <input value={fConfirm} onChange={e=>setFConfirm(e.target.value)} placeholder={t.confirmPassword} style={S.input} type="password" onKeyDown={e=>e.key==="Enter"&&doAdminLogin()}/>
+              )}
+              <button onClick={doAdminLogin} style={S.wineBtn}>
+                {adminAccount ? t.enter : (lang==="pt"?"Criar Admin":"Create Admin")}
+              </button>
             </>
           ) : authView==="login" ? (
             <>
@@ -605,6 +1781,11 @@ export default function NoaPilates() {
               <input value={fUsername} onChange={e=>setFUsername(e.target.value)} placeholder={t.username} style={S.input}/>
               <input value={fEmail} onChange={e=>setFEmail(e.target.value)} placeholder={t.email} style={S.input} type="email"/>
               <input value={fPhone} onChange={e=>setFPhone(e.target.value)} placeholder={t.phone} style={S.input} type="tel"/>
+              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                <input value={fBdayDay} onChange={e=>setFBdayDay(e.target.value.replace(/\D/g,"").slice(0,2))} placeholder={t.day} style={{...S.input,flex:1,marginBottom:0}} type="number" min="1" max="31"/>
+                <input value={fBdayMonth} onChange={e=>setFBdayMonth(e.target.value.replace(/\D/g,"").slice(0,2))} placeholder={t.month} style={{...S.input,flex:1,marginBottom:0}} type="number" min="1" max="12"/>
+              </div>
+              <div style={{fontSize:10,color:C.textLight,marginBottom:8,textAlign:"center"}}>🎂 {t.bdayOptional}</div>
               <input value={fPassword} onChange={e=>setFPassword(e.target.value)} placeholder={t.password} style={S.input} type="password"/>
               <input value={fConfirm} onChange={e=>setFConfirm(e.target.value)} placeholder={t.confirmPassword} style={S.input} type="password" onKeyDown={e=>e.key==="Enter"&&doSignUp()}/>
               <button onClick={doSignUp} style={S.wineBtn}>{t.create}</button>
@@ -659,6 +1840,9 @@ export default function NoaPilates() {
       <div style={S.header}>
         <div style={S.headerBrand}><NoaLogoBadge size={32}/><div><div style={S.brandName}>NOA PILATES</div><div style={S.brandCity}>{t.admin}</div></div></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <button onClick={()=>setShowInstructorsModal(true)} style={{...S.linkBtn,fontSize:14,margin:0,padding:0}} title={t.manageInstructors}>👩‍🏫</button>
+          <button onClick={()=>setShowAdminSettings(true)} style={{...S.linkBtn,fontSize:14,margin:0,padding:0}} title={t.adminSettings}>⚙</button>
+          <button onClick={()=>setDarkMode(d=>!d)} style={{...S.linkBtn,fontSize:14,margin:0,padding:0}} title={darkMode?t.lightMode:t.darkMode}>{darkMode?"☀️":"🌙"}</button>
           <button onClick={()=>setLang(l=>l==="en"?"pt":"en")} style={{...S.linkBtn,fontSize:11,margin:0,padding:0}}>{lang==="en"?"🇵🇹":"🇬🇧"}</button>
           <button onClick={doLogout} style={{...S.outlineBtn,fontSize:12}}>{t.exit}</button>
         </div>
@@ -666,7 +1850,7 @@ export default function NoaPilates() {
 
       {/* Admin nav */}
       <div style={S.nav}>
-        {[["schedule",t.classBookings],["packages",t.clientPackages],["clients",t.allClients]].map(([v,lb])=>(
+        {[["schedule",t.classBookings],["packages",t.clientPackages],["clients",t.allClients],["manageSchedule",t.manageSchedule],["managePackages",t.managePackages]].map(([v,lb])=>(
           <button key={v} onClick={()=>setAdminTab(v)} style={{...S.navBtn,borderBottom:adminTab===v?`2px solid ${C.wine}`:"2px solid transparent",color:adminTab===v?C.wine:C.textMid,fontWeight:adminTab===v?"bold":"normal"}}>{lb}</button>
         ))}
       </div>
@@ -687,6 +1871,24 @@ export default function NoaPilates() {
           ))}
         </div>
 
+        {/* Upcoming birthdays widget */}
+        {(() => {
+          const ups = upcomingBirthdays(14);
+          if (ups.length === 0) return null;
+          return (
+            <div style={{...S.card,padding:"12px 14px",marginBottom:18,borderLeft:`4px solid ${C.amber}`,background:C.amberPale}}>
+              <div style={{fontSize:11,color:C.amber,fontWeight:"bold",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>🎂 {t.upcomingBdays}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {ups.map((u,i)=>(
+                  <span key={i} onClick={()=>{setViewingClient(u.email);setAdminTab("clients");}} style={{...S.pill,background:"#fff",color:C.amber,border:`1px solid ${C.amberBorder}`,cursor:"pointer",padding:"4px 10px",fontSize:11}}>
+                    {u.daysUntil===0?"🎉 ":""}{u.name} · {u.daysUntil===0?(lang==="pt"?"hoje":"today"):`${u.daysUntil}d`}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* SCHEDULE TAB */}
         {adminTab==="schedule" && (
           <div>
@@ -694,7 +1896,8 @@ export default function NoaPilates() {
               <div key={day} style={{marginBottom:18}}>
                 <div style={S.adminDayHead}>{dayLabel(day,lang)}</div>
                 {SCHEDULE[day].map((slot,i)=>{
-                  const att = (bookings[slotKey(day,slot.time)]||[]).map(b=>b.email);
+                  const attBookings = (bookings[slotKey(day,slot.time)]||[]);
+                  const att = attBookings.map(b=>b.email);
                   const left = spotsLeft(day,slot.time);
                   const open = isOpen(day,slot.time);
                   return (
@@ -710,20 +1913,64 @@ export default function NoaPilates() {
                             <div style={{fontSize:10,color:C.textLight,marginTop:2}}>{deadlineLabel(day,slot.time,lang)}</div>
                             {att.length>0 ? (
                               <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
-                                {att.map((email,j)=>(
-                                  <span key={j} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:12,fontSize:11,background:C.winePale,color:C.wine,border:`1px solid ${C.borderMid}`}}>
-                                    <span onClick={()=>{setViewingClient(email);setAdminTab("clients");}} style={{cursor:"pointer",textDecoration:"underline"}}>{getUserName(email)}</span>
-                                    <button onClick={()=>cancelBooking(day,slot.time,email)} style={{background:"none",border:"none",color:C.textLight,cursor:"pointer",fontSize:13,padding:0,lineHeight:1}}>×</button>
-                                  </span>
-                                ))}
+                                {att.map((email,j)=>{
+                                  const ns = isNoShow(email,day,slot.time);
+                                  const bk = attBookings[j];
+                                  const wasCutLine = bk?.byAdmin && (bk?.priorWaitlistCount||0) > 0;
+                                  const tooltipMsg = wasCutLine
+                                    ? (lang==="pt"
+                                        ? `Adicionado por admin (à frente de ${bk.priorWaitlistCount} na lista de espera)`
+                                        : `Added by admin (ahead of ${bk.priorWaitlistCount} on waitlist)`)
+                                    : bk?.byAdmin
+                                      ? (lang==="pt"?"Adicionado por admin":"Added by admin")
+                                      : "";
+                                  return (
+                                    <span key={j} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:12,fontSize:11,background:ns?C.redPale:C.winePale,color:ns?C.red:C.wine,border:`1px solid ${ns?C.redBorder:C.borderMid}`,textDecoration:ns?"line-through":"none"}}>
+                                      <span onClick={()=>{setViewingClient(email);setAdminTab("clients");}} style={{cursor:"pointer",textDecoration:ns?"line-through":"underline"}}>{getUserName(email)}</span>
+                                      {bk?.byAdmin && (
+                                        <span title={tooltipMsg} style={{fontSize:9,color:wasCutLine?C.amber:C.textLight,fontStyle:"italic"}}>
+                                          {wasCutLine ? `★${bk.priorWaitlistCount}` : "★"}
+                                        </span>
+                                      )}
+                                      {ns
+                                        ? <button onClick={()=>unmarkNoShow(email,day,slot.time)} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:10,padding:"0 2px"}} title={t.unmarkNoShow}>↺</button>
+                                        : <button onClick={()=>{if(confirm(t.confirmNoShowQ))markNoShow(email,day,slot.time);}} style={{background:"none",border:"none",color:C.amber,cursor:"pointer",fontSize:10,padding:"0 2px"}} title={t.markNoShow}>⚠</button>
+                                      }
+                                      <button onClick={()=>cancelBooking(day,slot.time,email)} style={{background:"none",border:"none",color:C.textLight,cursor:"pointer",fontSize:13,padding:0,lineHeight:1}} title={t.cancel}>×</button>
+                                    </span>
+                                  );
+                                })}
                               </div>
                             ) : <div style={{fontSize:11,color:C.textLight,marginTop:3}}>{t.noBookings}</div>}
+                            {/* Waitlist for this slot */}
+                            {(() => {
+                              const sk = slotKey(day,slot.time);
+                              const queue = waitlist[sk] || [];
+                              if (queue.length === 0) return null;
+                              return (
+                                <div style={{marginTop:8,paddingTop:6,borderTop:`1px dashed ${C.border}`}}>
+                                  <div style={{fontSize:9,color:C.textLight,textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>⏳ {t.waitlistFor} ({queue.length})</div>
+                                  <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                                    {queue.map((w,j)=>{
+                                      const tl = w.notified ? waitlistTimeLeft(day, slot.time, w.email) : null;
+                                      return (
+                                        <span key={j} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:12,fontSize:10,background:w.notified?C.amberPale:C.surfaceAlt,color:w.notified?C.amber:C.textMid,border:`1px solid ${w.notified?C.amberBorder:C.border}`}}>
+                                          {j+1}. {getUserName(w.email)}
+                                          {w.notified && tl != null && <span style={{fontSize:9}}>⏰ {formatTimeLeft(tl)}</span>}
+                                          <button onClick={()=>leaveWaitlist(day,slot.time,w.email)} style={{background:"none",border:"none",color:C.textLight,cursor:"pointer",fontSize:11,padding:0,lineHeight:1}}>×</button>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                         <div style={{textAlign:"right",flexShrink:0}}>
                           <div style={{fontSize:15,fontWeight:"bold",color:left===0?C.red:C.wine}}>{MAX_SPOTS(slot.name)-left}/{MAX_SPOTS(slot.name)}</div>
                           <div style={{fontSize:9,color:C.textLight,marginBottom:5}}>{lang==="pt"?"marcados":"booked"}</div>
-                          <select onChange={e=>{if(e.target.value){const em=e.target.value;if(!isBookedBy(day,slot.time,em)&&spotsLeft(day,slot.time)>0){setBookings(prev=>({...prev,[slotKey(day,slot.time)]:[...(prev[slotKey(day,slot.time)]||[]),{email:em,ts:new Date().toISOString()}]}));fire(`${getUserName(em)} ${t.addedTo} ${slot.time}`);}else fire(t.alreadyBookedOrFull,"warn");e.target.value="";}}} style={{fontSize:10,padding:"3px 6px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surfaceAlt,color:C.textMid,fontFamily:"Georgia,serif",cursor:"pointer",maxWidth:120}}>
+                          <select onChange={e=>{if(e.target.value){adminAddBooking(day,slot.time,e.target.value);e.target.value="";}}} style={{fontSize:10,padding:"3px 6px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surfaceAlt,color:C.textMid,fontFamily:"Georgia,serif",cursor:"pointer",maxWidth:120}}>
                             <option value="">{t.addClient}</option>
                             {allClientEmails().filter(em=>!isBookedBy(day,slot.time,em)).map(em=><option key={em} value={em}>{getUserName(em)}</option>)}
                           </select>
@@ -822,9 +2069,51 @@ export default function NoaPilates() {
                     <div style={{display:"grid",gridTemplateColumns:"100px 1fr",gap:8,fontSize:13}}>
                       <div style={{color:C.textLight}}>{t.email}:</div><div style={{color:C.text}}>{u.email}</div>
                       <div style={{color:C.textLight}}>{t.phone}:</div><div style={{color:C.text}}>{u.phone||"—"}</div>
+                      {u.bdayDay && u.bdayMonth ? (
+                        <>
+                          <div style={{color:C.textLight}}>🎂 {t.birthday}:</div>
+                          <div style={{color:C.text}}>
+                            {String(u.bdayDay).padStart(2,"0")}/{String(u.bdayMonth).padStart(2,"0")}
+                            {isBirthdayToday(u) && <span style={{marginLeft:8,color:C.amber,fontWeight:"bold"}}>{t.bdayToday}</span>}
+                          </div>
+                        </>
+                      ) : null}
                       <div style={{color:C.textLight}}>{t.joined}:</div><div style={{color:C.text}}>{u.joinedAt}</div>
                     </div>
                   </div>
+
+                  {/* Private notes (admin only) */}
+                  <div style={S.sectionLabel}>📝 {t.privateNotes}</div>
+                  <div style={{...S.card,padding:"14px 16px",marginBottom:18}}>
+                    <textarea
+                      value={clientNotes[u.email] || ""}
+                      onChange={e=>setClientNotes(prev=>({...prev,[u.email]:e.target.value}))}
+                      placeholder={t.notesPlaceholder}
+                      rows={4}
+                      style={{...S.input,resize:"vertical",fontFamily:"Georgia,serif",fontSize:12,lineHeight:1.5,marginBottom:0}}
+                    />
+                    <div style={{fontSize:10,color:C.textLight,marginTop:6,fontStyle:"italic"}}>
+                      {lang==="pt"?"Visível apenas para o admin. Auto-guardado.":"Visible only to admin. Auto-saved."}
+                    </div>
+                  </div>
+
+                  {/* No-show history */}
+                  {(() => {
+                    const list = noShowsFor(u.email);
+                    if (list.length === 0) return null;
+                    return (
+                      <>
+                        <div style={S.sectionLabel}>⚠️ {t.noShowHistory} ({list.length})</div>
+                        <div style={{...S.card,padding:"12px 16px",marginBottom:18}}>
+                          {list.sort((a,b)=>b.date.localeCompare(a.date)).map((ns,i)=>(
+                            <div key={i} style={{fontSize:12,color:C.textMid,padding:"4px 0",borderBottom:i<list.length-1?`1px dashed ${C.border}`:"none"}}>
+                              <span style={{color:C.red,fontWeight:"bold"}}>{ns.date}</span> · {t.days[ns.day]} {ns.time}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {/* Password management */}
                   <div style={S.sectionLabel}>🔐 {t.passwordManagement}</div>
@@ -882,23 +2171,94 @@ export default function NoaPilates() {
                   }
 
                   {/* Packages */}
-                  <div style={{...S.sectionLabel,marginTop:18}}>{t.myPackages}</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:18,marginBottom:8}}>
+                    <div style={{...S.sectionLabel,margin:0}}>{t.myPackages}</div>
+                    <button onClick={()=>{setShowBonusPkgModal(true);setBonusType("reformer");setBonusQty("");setBonusValidityDays("30");}} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px"}}>{t.grantBonus}</button>
+                  </div>
                   {userPkgs.length===0
                     ? <div style={{...S.card,padding:18,textAlign:"center",color:C.textLight}}>{t.noPackagesYet}</div>
                     : userPkgs.map((p,i)=>{
                         const pkg = PACKAGES[p.pkgKey];
+                        const valid = pkgIsValid(p);
+                        const daysLeft = pkgDaysLeft(p);
+                        const sessionsLeft = pkgSessionsLeft(p);
+                        const isComboType = p.pkgKey === "combo";
                         return (
-                          <div key={i} style={{...S.card,marginBottom:8,borderLeft:`4px solid ${pkg.color}`,padding:"11px 14px"}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                              <div>
-                                <div style={{fontSize:13,color:C.text}}>{pkg.icon} {p.label}</div>
-                                <div style={{fontSize:11,color:C.textLight,marginTop:2}}>{p.sessions.length}{p.qty?`/${p.qty}`:""} {t.sessions} · {t.started} {p.startDate}</div>
+                          <div key={i} style={{...S.card,marginBottom:10,borderLeft:`4px solid ${pkg.color}`,padding:"12px 14px",opacity:!valid?.7:1}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+                              <div style={{flex:1,minWidth:200}}>
+                                <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:3}}>
+                                  <span style={{fontSize:13,color:C.text,fontWeight:"bold"}}>{pkg.icon} {p.label}</span>
+                                  {p.isBonus&&<span style={{...S.pill,background:C.tealPale,color:C.teal,border:`1px solid ${C.tealBorder}`}}>🎁 {lang==="pt"?"Bónus":"Bonus"}</span>}
+                                  {!p.paid&&<span style={{...S.pill,background:C.amberPale,color:C.amber,border:`1px solid ${C.amberBorder}`}}>{t.notPaidYet}</span>}
+                                  {!valid&&<span style={{...S.pill,background:C.redPale,color:C.red,border:`1px solid ${C.redBorder}`}}>{t.expired}</span>}
+                                </div>
+                                <div style={{fontSize:11,color:C.textLight,marginTop:2}}>
+                                  {t.started} {p.startDate}
+                                  {p.paid && p.paidDate && ` · ${t.paidOn} ${p.paidDate}`}
+                                </div>
+                                {/* Credits info */}
+                                <div style={{marginTop:7,display:"flex",gap:6,flexWrap:"wrap"}}>
+                                  {isComboType && p.qty ? (
+                                    <>
+                                      <span style={{...S.pill,background:C.winePale,color:C.wine,border:`1px solid ${C.borderMid}`}}>🛏️ {comboTypeLeft(p,"reformer")} {t.classesLeft}</span>
+                                      <span style={{...S.pill,background:C.greenPale,color:C.green,border:`1px solid ${C.greenBorder}`}}>🧘 {comboTypeLeft(p,"mat")} {t.classesLeft}</span>
+                                    </>
+                                  ) : sessionsLeft !== Infinity ? (
+                                    <span style={{...S.pill,background:C.surfaceAlt,color:C.textMid,border:`1px solid ${C.border}`}}>{sessionsLeft} {t.classesLeft} ({p.sessions.length}/{(p.qty||0)+(p.extraSessions||0)})</span>
+                                  ) : null}
+                                  {daysLeft != null && (
+                                    <span style={{...S.pill,background:daysLeft<=7?C.amberPale:C.surfaceAlt,color:daysLeft<=7?C.amber:C.textMid,border:`1px solid ${daysLeft<=7?C.amberBorder:C.border}`}}>
+                                      {valid?`${daysLeft} ${t.daysRemaining}`:t.expired}
+                                    </span>
+                                  )}
+                                  {(p.extraValidityDays||0)>0 && (
+                                    <span style={{...S.pill,background:C.tealPale,color:C.teal,border:`1px solid ${C.tealBorder}`}}>+{p.extraValidityDays} {lang==="pt"?"dias bónus":"bonus days"}</span>
+                                  )}
+                                </div>
                               </div>
                               <div style={{textAlign:"right"}}>
-                                <div style={{fontSize:14,fontWeight:"bold",color:p.paid?C.green:C.amber}}>€{p.price}</div>
-                                <div style={{fontSize:11,color:p.paid?C.green:C.amber}}>{p.paid?t.paid:t.pending}</div>
+                                <div style={{fontSize:15,fontWeight:"bold",color:p.paid?C.green:C.amber}}>€{p.price}</div>
                               </div>
                             </div>
+                            {/* Action buttons */}
+                            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:10,paddingTop:9,borderTop:`1px solid ${C.border}`}}>
+                              {!p.paid
+                                ? <button onClick={()=>markPaid(viewingClient,p.id)} style={{...S.greenBtn,fontSize:11,padding:"5px 10px",marginTop:0}}>✓ {t.markPaid}</button>
+                                : <button onClick={()=>unmarkPaid(viewingClient,p.id)} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px",color:C.amber,borderColor:C.amberBorder}}>{t.unmarkPaid}</button>
+                              }
+                              <button onClick={()=>{setShowExtraCreditsModal(p.id);setExtraCreditsAmount("");}} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px"}}>{t.extraCredits}</button>
+                              <button onClick={()=>{setShowExtendValidityModal(p.id);setExtendDaysAmount("");}} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px"}}>{t.extendValidity}</button>
+                              {isFrozen(p.id)
+                                ? <button onClick={()=>unfreezePackage(viewingClient,p.id)} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px",color:C.blue,borderColor:C.blueBorder}}>{t.unfreeze}</button>
+                                : <button onClick={()=>{setShowFreezeModal(p.id);setFreezeDays("");setFreezeReason("");}} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px"}}>{t.freeze}</button>
+                              }
+                              <button onClick={()=>removePkg(viewingClient,p.id)} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px",color:C.red,borderColor:C.redBorder}}>{t.remove}</button>
+                            </div>
+                            {/* Freeze status banner */}
+                            {isFrozen(p.id) && (() => {
+                              const f = freezeInfo(p.id);
+                              const daysLeft = Math.ceil((f.endTs - Date.now())/(24*60*60*1000));
+                              return (
+                                <div style={{marginTop:8,padding:"7px 11px",background:C.bluePale,border:`1px solid ${C.blueBorder}`,borderRadius:7,fontSize:11,color:C.blue}}>
+                                  ❄️ {t.frozenStatus} · {t.frozenUntil} {fmt(new Date(f.endTs))} ({daysLeft}{t.daysShortLabel})
+                                  {f.reason && <div style={{fontSize:10,color:C.textLight,marginTop:2,fontStyle:"italic"}}>{f.reason}</div>}
+                                </div>
+                              );
+                            })()}
+                            {/* Sessions log */}
+                            {p.sessions.length>0 && (
+                              <div style={{marginTop:9,paddingTop:9,borderTop:`1px solid ${C.border}`}}>
+                                <div style={{fontSize:10,color:C.textLight,textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>{t.sessionsLogTitle}</div>
+                                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                                  {p.sessions.map((s,j)=>(
+                                    <span key={j} style={{...S.pill,background:C.surfaceAlt,color:C.textMid,border:`1px solid ${C.border}`,fontSize:10}}>
+                                      {j+1}. {s.date} · {s.class} {s.time}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })
@@ -912,10 +2272,23 @@ export default function NoaPilates() {
                   ? <div style={{...S.card,padding:32,textAlign:"center",color:C.textLight}}>{t.noClientsYet}</div>
                   : <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
                       {Object.values(users).map(u=>{
-                        const userBookings = DAYS.flatMap(d=>SCHEDULE[d].filter(s=>isBookedBy(d,s.time,u.email)).length>0?[1]:[]).length;
-                        const userPkgsCount = myPkgsFor(u.email).length;
+                        const userBookings = DAYS.flatMap(d=>(SCHEDULE[d]||[]).filter(s=>isBookedBy(d,s.time,u.email)).length>0?[1]:[]).length;
+                        const userPkgsAll = myPkgsFor(u.email);
+                        const activePkgs = userPkgsAll.filter(p=>p.paid && pkgIsValid(p));
+                        const unpaidCount = userPkgsAll.filter(p=>!p.paid).length;
+                        const totalCreditsLeft = activePkgs.reduce((sum,p)=>{
+                          const left = pkgSessionsLeft(p);
+                          return left===Infinity ? sum : sum + Math.max(0,left);
+                        },0);
+                        // Soonest expiry
+                        const soonestExpiry = activePkgs
+                          .map(p=>pkgDaysLeft(p))
+                          .filter(d=>d!=null)
+                          .sort((a,b)=>a-b)[0];
+                        const hasNotes = !!(clientNotes[u.email] && clientNotes[u.email].trim());
+                        const noShowCount = noShowsFor(u.email).length;
                         return (
-                          <div key={u.email} onClick={()=>setViewingClient(u.email)} style={{...S.card,padding:"14px 16px",cursor:"pointer",borderLeft:`4px solid ${C.wine}`,transition:"transform .15s"}}
+                          <div key={u.email} onClick={()=>setViewingClient(u.email)} style={{...S.card,padding:"14px 16px",cursor:"pointer",borderLeft:`4px solid ${hasNotes?C.amber:C.wine}`,transition:"transform .15s"}}
                             onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"}
                             onMouseLeave={e=>e.currentTarget.style.transform=""}>
                             <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:10}}>
@@ -923,15 +2296,25 @@ export default function NoaPilates() {
                                 {u.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()}
                               </div>
                               <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontSize:14,color:C.text,fontWeight:"bold",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name}</div>
+                                <div style={{fontSize:14,color:C.text,fontWeight:"bold",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>
+                                  {u.name}
+                                  {hasNotes && <span title={t.healthFlag} style={{fontSize:13}}>⚠️</span>}
+                                </div>
                                 <div style={{fontSize:11,color:C.textLight,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>@{u.username}</div>
                               </div>
                             </div>
                             <div style={{fontSize:11,color:C.textLight,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:3}}>{u.email}</div>
                             {u.phone&&<div style={{fontSize:11,color:C.textLight,marginBottom:8}}>📞 {u.phone}</div>}
+                            {/* credit/payment summary */}
+                            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
+                              {totalCreditsLeft>0 && <span style={{...S.pill,background:C.greenPale,color:C.green,border:`1px solid ${C.greenBorder}`,fontSize:10}}>{totalCreditsLeft} {t.classesLeft}</span>}
+                              {soonestExpiry!=null && <span style={{...S.pill,background:soonestExpiry<=7?C.amberPale:C.surfaceAlt,color:soonestExpiry<=7?C.amber:C.textMid,border:`1px solid ${soonestExpiry<=7?C.amberBorder:C.border}`,fontSize:10}}>{t.expiresIn} {soonestExpiry}{t.daysShort}</span>}
+                              {unpaidCount>0 && <span style={{...S.pill,background:C.redPale,color:C.red,border:`1px solid ${C.redBorder}`,fontSize:10}}>{unpaidCount} {t.unpaid}</span>}
+                              {noShowCount>0 && <span style={{...S.pill,background:C.redPale,color:C.red,border:`1px solid ${C.redBorder}`,fontSize:10}}>⚠ {noShowCount} {t.noShowsCount}</span>}
+                            </div>
                             <div style={{display:"flex",gap:14,marginTop:6,paddingTop:8,borderTop:`1px solid ${C.border}`}}>
                               <div><span style={{fontSize:14,fontWeight:"bold",color:C.wine}}>{userBookings}</span><span style={{fontSize:10,color:C.textLight,marginLeft:4}}>{t.bookings}</span></div>
-                              <div><span style={{fontSize:14,fontWeight:"bold",color:C.blue}}>{userPkgsCount}</span><span style={{fontSize:10,color:C.textLight,marginLeft:4}}>{t.packages}</span></div>
+                              <div><span style={{fontSize:14,fontWeight:"bold",color:C.blue}}>{userPkgsAll.length}</span><span style={{fontSize:10,color:C.textLight,marginLeft:4}}>{t.packages}</span></div>
                             </div>
                           </div>
                         );
@@ -940,6 +2323,86 @@ export default function NoaPilates() {
                 }
               </>
             )}
+          </div>
+        )}
+
+        {/* MANAGE SCHEDULE TAB */}
+        {adminTab==="manageSchedule" && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h2 style={{...S.pageTitle,margin:0}}>{t.manageSchedule}</h2>
+              <button onClick={()=>{setShowScheduleEditor("new");setScheduleEditDay("Monday");setScheduleEditTime("");setScheduleEditName("Reformer");setScheduleEditTag("");setScheduleEditInstructor("");}} style={{...S.wineBtn,padding:"8px 14px",fontSize:12,marginTop:0}}>
+                {t.addClass}
+              </button>
+            </div>
+            {DAYS.map(day=>(
+              <div key={day} style={{marginBottom:18}}>
+                <div style={S.adminDayHead}>{t.days[day]}</div>
+                {(SCHEDULE[day]||[]).length===0
+                  ? <div style={{padding:"10px 14px",fontSize:11,color:C.textLight,fontStyle:"italic"}}>{lang==="pt"?"Sem aulas":"No classes"}</div>
+                  : SCHEDULE[day].map((slot,i)=>(
+                      <div key={i} style={{...S.card,marginBottom:6,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:13,color:C.text}}><b style={{color:C.wine}}>{slot.time}</b> · {slot.name}{slot.tag?<span style={{color:C.textLight}}> ✦ {slot.tag}</span>:""}</div>
+                          <div style={{fontSize:10,color:C.textLight,marginTop:2}}>
+                            {lang==="pt"?"Lugares":"Spots"}: {MAX_SPOTS(slot.name)}
+                            {slot.instructor && <span> · 👩‍🏫 {slot.instructor}</span>}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",gap:6}}>
+                          <button onClick={()=>{setShowScheduleEditor({day,idx:i});setScheduleEditDay(day);setScheduleEditTime(slot.time);setScheduleEditName(slot.name);setScheduleEditTag(slot.tag||"");setScheduleEditInstructor(slot.instructor||"");}} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px"}}>{t.editClass}</button>
+                          <button onClick={()=>deleteSlot(day,i)} style={{...S.outlineBtn,fontSize:11,padding:"5px 10px",color:C.red,borderColor:C.redBorder}}>{t.deleteClass}</button>
+                        </div>
+                      </div>
+                    ))
+                }
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* MANAGE PACKAGES TAB */}
+        {adminTab==="managePackages" && (
+          <div>
+            <h2 style={S.pageTitle}>{t.managePackages}</h2>
+            <p style={{fontSize:11,color:C.textLight,marginBottom:14,lineHeight:1.5}}>
+              {lang==="pt"
+                ? "Edita os preços e nomes dos pacotes. As alterações aplicam-se a novos pacotes atribuídos — pacotes já comprados mantêm o preço original."
+                : "Edit package prices and labels. Changes apply to new packages assigned — already-bought packages keep their original price."}
+            </p>
+            {Object.entries(PACKAGES).map(([key,pkg])=>(
+              <div key={key} style={{...S.card,padding:"12px 14px",marginBottom:14,borderTop:`3px solid ${pkg.color}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
+                  <span style={{fontSize:18}}>{pkg.icon}</span>
+                  <span style={{fontSize:13,fontWeight:"bold",color:pkg.color}}>{pkg.label}</span>
+                </div>
+                {pkg.groups
+                  ? pkg.groups.map(g=>(
+                      <div key={g.name} style={{marginBottom:10}}>
+                        <div style={{fontSize:10,color:C.textLight,textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>{g.name}</div>
+                        {g.opts.map(o=>(
+                          <div key={o.id} style={{display:"flex",gap:7,alignItems:"center",marginBottom:5}}>
+                            <input value={o.label} onChange={e=>updatePackageOption(key,o.id,"label",e.target.value)} style={{...S.input,fontSize:12,padding:"6px 10px",margin:0,flex:2}}/>
+                            <div style={{display:"flex",alignItems:"center",gap:3}}>
+                              <span style={{fontSize:13,color:C.textMid}}>€</span>
+                              <input type="number" value={o.price} onChange={e=>updatePackageOption(key,o.id,"price",Number(e.target.value)||0)} style={{...S.input,fontSize:12,padding:"6px 10px",margin:0,width:80,textAlign:"right"}}/>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))
+                  : pkg.opts.map(o=>(
+                      <div key={o.id} style={{display:"flex",gap:7,alignItems:"center",marginBottom:5}}>
+                        <input value={o.label} onChange={e=>updatePackageOption(key,o.id,"label",e.target.value)} style={{...S.input,fontSize:12,padding:"6px 10px",margin:0,flex:2}}/>
+                        <div style={{display:"flex",alignItems:"center",gap:3}}>
+                          <span style={{fontSize:13,color:C.textMid}}>€</span>
+                          <input type="number" value={o.price} onChange={e=>updatePackageOption(key,o.id,"price",Number(e.target.value)||0)} style={{...S.input,fontSize:12,padding:"6px 10px",margin:0,width:80,textAlign:"right"}}/>
+                        </div>
+                      </div>
+                    ))
+                }
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -1022,6 +2485,178 @@ export default function NoaPilates() {
           </div>
         </div>
       )}
+
+      {/* ADMIN SETTINGS MODAL */}
+      {showAdminSettings && (
+        <AdminSettingsModal
+          adminAccount={adminAccount}
+          lang={lang}
+          t={t}
+          onClose={()=>setShowAdminSettings(false)}
+          onSave={(newEmail,curPwd,newPwd)=>{updateAdminCredentials(newEmail,curPwd,newPwd);setShowAdminSettings(false);}}
+        />
+      )}
+
+      {/* MANAGE INSTRUCTORS MODAL */}
+      {showInstructorsModal && (
+        <div style={S.overlay} onClick={()=>setShowInstructorsModal(false)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,fontSize:16,color:C.text}}>👩‍🏫 {t.manageInstructors}</h3>
+              <button onClick={()=>setShowInstructorsModal(false)} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+            </div>
+            <div style={{display:"flex",gap:6,marginBottom:14}}>
+              <input value={newInstructorName} onChange={e=>setNewInstructorName(e.target.value)} placeholder={t.instructorName} style={{...S.input,flex:1,marginBottom:0}} onKeyDown={e=>e.key==="Enter"&&addInstructor(newInstructorName)}/>
+              <button onClick={()=>addInstructor(newInstructorName)} style={{...S.wineBtn,padding:"10px 14px",fontSize:12,marginTop:0}}>{t.addInstructor}</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {instructors.length === 0
+                ? <div style={{fontSize:12,color:C.textLight,textAlign:"center",padding:14}}>{lang==="pt"?"Nenhuma instrutora ainda":"No instructors yet"}</div>
+                : instructors.map(name => (
+                    <div key={name} style={{...S.card,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:13,color:C.text}}>👩‍🏫 {name}</span>
+                      <button onClick={()=>removeInstructor(name)} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:13,padding:"4px 8px"}}>×</button>
+                    </div>
+                  ))
+              }
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SCHEDULE EDITOR MODAL */}
+      {showScheduleEditor && (
+        <div style={S.overlay} onClick={()=>setShowScheduleEditor(null)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,fontSize:16,color:C.text}}>{showScheduleEditor==="new"?t.addClass:t.editClass}</h3>
+              <button onClick={()=>setShowScheduleEditor(null)} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+            </div>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{lang==="pt"?"Dia":"Day"}</label>
+            <select value={scheduleEditDay} onChange={e=>setScheduleEditDay(e.target.value)} style={{...S.input,marginBottom:10}}>
+              {DAYS.map(d=><option key={d} value={d}>{t.days[d]}</option>)}
+            </select>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.classTime}</label>
+            <input value={scheduleEditTime} onChange={e=>setScheduleEditTime(e.target.value)} placeholder="10:00" style={{...S.input,marginBottom:10}}/>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.className}</label>
+            <select value={scheduleEditName} onChange={e=>setScheduleEditName(e.target.value)} style={{...S.input,marginBottom:10}}>
+              <option value="Reformer">Reformer</option>
+              <option value="Mat">Mat</option>
+              <option value="Dynamic Mat">Dynamic Mat</option>
+              <option value="Mat Pilates">Mat Pilates</option>
+            </select>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.classTag}</label>
+            <select value={scheduleEditTag} onChange={e=>setScheduleEditTag(e.target.value)} style={{...S.input,marginBottom:10}}>
+              <option value="">— {lang==="pt"?"Nenhuma":"None"} —</option>
+              <option value="Power Flow">Power Flow</option>
+              <option value="Back pain & injury">Back pain & injury</option>
+              <option value="Mom & Baby">Mom & Baby</option>
+              <option value="Beginner">Beginner</option>
+            </select>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>👩‍🏫 {t.instructor}</label>
+            <select value={scheduleEditInstructor} onChange={e=>setScheduleEditInstructor(e.target.value)} style={{...S.input,marginBottom:14}}>
+              <option value="">— {t.noInstructor} —</option>
+              {instructors.map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setShowScheduleEditor(null)} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
+              <button onClick={upsertSlot} style={{...S.wineBtn,flex:1,padding:"10px",marginTop:0}}>{t.saveChanges}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXTRA CREDITS MODAL */}
+      {showExtraCreditsModal && (
+        <div style={S.overlay} onClick={()=>setShowExtraCreditsModal(null)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,fontSize:16,color:C.text}}>{t.extraCredits}</h3>
+              <button onClick={()=>setShowExtraCreditsModal(null)} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+            </div>
+            <p style={{margin:"0 0 14px",fontSize:12,color:C.textLight,lineHeight:1.5}}>
+              {lang==="pt"?"Adicionar aulas extra a este pacote como cortesia:":"Add extra classes to this package as a courtesy:"}
+            </p>
+            <input type="number" value={extraCreditsAmount} onChange={e=>setExtraCreditsAmount(e.target.value)} placeholder="3" style={{...S.input,marginBottom:14}} autoFocus/>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setShowExtraCreditsModal(null)} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
+              <button onClick={()=>{addExtraCredits(viewingClient,showExtraCreditsModal,parseInt(extraCreditsAmount,10));setShowExtraCreditsModal(null);setExtraCreditsAmount("");}} style={{...S.wineBtn,flex:1,padding:"10px",marginTop:0}}>{t.saveChanges}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXTEND VALIDITY MODAL */}
+      {showExtendValidityModal && (
+        <div style={S.overlay} onClick={()=>setShowExtendValidityModal(null)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,fontSize:16,color:C.text}}>{t.extendValidity}</h3>
+              <button onClick={()=>setShowExtendValidityModal(null)} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+            </div>
+            <p style={{margin:"0 0 14px",fontSize:12,color:C.textLight,lineHeight:1.5}}>
+              {lang==="pt"?"Adicionar dias à validade deste pacote:":"Add days to this package's validity:"}
+            </p>
+            <input type="number" value={extendDaysAmount} onChange={e=>setExtendDaysAmount(e.target.value)} placeholder="14" style={{...S.input,marginBottom:14}} autoFocus/>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setShowExtendValidityModal(null)} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
+              <button onClick={()=>{extendValidity(viewingClient,showExtendValidityModal,parseInt(extendDaysAmount,10));setShowExtendValidityModal(null);setExtendDaysAmount("");}} style={{...S.wineBtn,flex:1,padding:"10px",marginTop:0}}>{t.saveChanges}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FREEZE PACKAGE MODAL */}
+      {showFreezeModal && (
+        <div style={S.overlay} onClick={()=>setShowFreezeModal(null)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,fontSize:16,color:C.text}}>❄️ {t.freezeMembership}</h3>
+              <button onClick={()=>setShowFreezeModal(null)} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+            </div>
+            <p style={{margin:"0 0 14px",fontSize:12,color:C.textLight,lineHeight:1.5}}>
+              {lang==="pt"?"Pausa este pacote. A validade é estendida pelo mesmo número de dias.":"Pause this package. Validity is extended by the same number of days."}
+            </p>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.freezeDays}</label>
+            <input type="number" value={freezeDays} onChange={e=>setFreezeDays(e.target.value)} placeholder="14" style={{...S.input,marginBottom:10}} autoFocus/>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.freezeReason}</label>
+            <input value={freezeReason} onChange={e=>setFreezeReason(e.target.value)} placeholder={t.freezeReasonPlaceholder} style={{...S.input,marginBottom:14}}/>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setShowFreezeModal(null)} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
+              <button onClick={()=>{freezePackage(viewingClient,showFreezeModal,parseInt(freezeDays,10),freezeReason);setShowFreezeModal(null);setFreezeDays("");setFreezeReason("");}} style={{...S.wineBtn,flex:1,padding:"10px",marginTop:0}}>{t.saveChanges}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* BONUS PACKAGE MODAL */}
+      {showBonusPkgModal && (
+        <div style={S.overlay} onClick={()=>setShowBonusPkgModal(false)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,fontSize:16,color:C.text}}>{t.grantBonus}</h3>
+              <button onClick={()=>setShowBonusPkgModal(false)} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+            </div>
+            <p style={{margin:"0 0 14px",fontSize:12,color:C.textLight,lineHeight:1.5}}>
+              {lang==="pt"?`Pacote de cortesia para ${getUserName(viewingClient)}:`:`Courtesy package for ${getUserName(viewingClient)}:`}
+            </p>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.bonusType}</label>
+            <select value={bonusType} onChange={e=>setBonusType(e.target.value)} style={{...S.input,marginBottom:10}}>
+              <option value="reformer">🛏️ Reformer</option>
+              <option value="mat">🧘 Mat</option>
+              <option value="combo">🔀 Combo (Reformer + Mat)</option>
+            </select>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.bonusQty}</label>
+            <input type="number" value={bonusQty} onChange={e=>setBonusQty(e.target.value)} placeholder="3" style={{...S.input,marginBottom:10}}/>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.bonusValidity}</label>
+            <input type="number" value={bonusValidityDays} onChange={e=>setBonusValidityDays(e.target.value)} placeholder="30" style={{...S.input,marginBottom:14}}/>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setShowBonusPkgModal(false)} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
+              <button onClick={()=>{grantBonusPackage(viewingClient,bonusType,parseInt(bonusQty,10),parseInt(bonusValidityDays,10));setShowBonusPkgModal(false);setBonusQty("");}} style={{...S.wineBtn,flex:1,padding:"10px",marginTop:0}}>{t.saveChanges}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{CSS}</style>
     </div>
   );
@@ -1039,6 +2674,7 @@ export default function NoaPilates() {
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <div style={S.userPill}><span style={S.dot}/>{me?.name}</div>
+          <button onClick={()=>setDarkMode(d=>!d)} style={{...S.linkBtn,fontSize:14,margin:0,padding:0}} title={darkMode?t.lightMode:t.darkMode}>{darkMode?"☀️":"🌙"}</button>
           <button onClick={()=>setLang(l=>l==="en"?"pt":"en")} style={{...S.linkBtn,fontSize:11,margin:0,padding:0}}>{lang==="en"?"🇵🇹":"🇬🇧"}</button>
           <button onClick={doLogout} style={{...S.linkBtn,fontSize:11,margin:0,padding:0}}>{t.logout}</button>
         </div>
@@ -1055,28 +2691,93 @@ export default function NoaPilates() {
         {/* BOOK TAB */}
         {tab==="book" && (
           <div>
-            {activePkgFor(currentUser)&&(()=>{
-              const p=activePkgFor(currentUser); const pkg=PACKAGES[p.pkgKey];
+            {/* Birthday banner */}
+            {me && isBirthdayToday(me) && (
+              <div style={{...S.card,marginBottom:14,padding:"14px 18px",background:`linear-gradient(135deg,${C.winePale},${C.amberPale})`,borderLeft:`4px solid ${C.amber}`,textAlign:"center"}}>
+                <div style={{fontSize:24,marginBottom:4}}>🎂🎉</div>
+                <div style={{fontSize:14,color:C.wine,fontWeight:"bold"}}>{t.happyBirthday} {me.name.split(" ")[0]}!</div>
+                <div style={{fontSize:11,color:C.textMid,marginTop:3}}>{lang==="pt"?"De toda a equipa Noa Pilates 💕":"From the entire Noa Pilates team 💕"}</div>
+              </div>
+            )}
+            {/* Credit summary header — shows status of the user's packages */}
+            {(()=>{
+              const userPkgs = myPkgsFor(currentUser);
+              const validPkgs = userPkgs.filter(p=>p.paid && pkgIsValid(p));
+              if (validPkgs.length === 0) {
+                return (
+                  <div style={{...S.card,marginBottom:14,borderLeft:`4px solid ${C.amber}`,padding:"12px 16px",background:C.amberPale}}>
+                    <div style={{fontSize:13,color:C.amber,fontWeight:"bold",marginBottom:4}}>⚠️ {t.noCreditTitle}</div>
+                    <div style={{fontSize:12,color:C.textMid,lineHeight:1.5}}>{t.noCreditDesc}</div>
+                  </div>
+                );
+              }
               return (
-                <div style={{...S.card,marginBottom:14,borderLeft:`4px solid ${pkg.color}`,padding:"11px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontSize:11,color:C.textLight,textTransform:"uppercase",letterSpacing:1}}>{t.activePackage}</div>
-                    <div style={{fontSize:14,color:pkg.color,marginTop:2}}>{pkg.icon} {p.label}</div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:13,fontWeight:"bold",color:pkg.color}}>{p.sessions.length}{p.qty?`/${p.qty}`:""} {t.sessions}</div>
-                    <div style={{fontSize:11,color:C.textLight}}>{t.autoLogged}</div>
-                  </div>
+                <div style={{marginBottom:14,display:"flex",flexDirection:"column",gap:7}}>
+                  {validPkgs.map((p,idx)=>{
+                    const pkg = PACKAGES[p.pkgKey];
+                    const daysLeft = pkgDaysLeft(p);
+                    const allowance = membershipWeeklyAllowance(p);
+                    const isMember = p.pkgKey === "membership";
+                    const usedThisWeek = isMember ? membershipUsedInWeekOf(p, lisbonNow()) : 0;
+                    return (
+                      <div key={idx} style={{...S.card,borderLeft:`4px solid ${pkg.color}`,padding:"10px 14px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,color:pkg.color,fontWeight:"bold"}}>{pkg.icon} {p.label}</div>
+                            <div style={{fontSize:11,color:C.textLight,marginTop:2}}>
+                              {isMember
+                                ? (allowance===Infinity
+                                    ? `Unlimited`
+                                    : (p.optId==="combo_m"
+                                        ? `1 Reformer + 1 Mat / ${lang==="pt"?"semana":"week"}`
+                                        : `${allowance}× / ${lang==="pt"?"semana":"week"} · ${usedThisWeek}/${allowance===Infinity?"∞":allowance} ${t.weekUsed}`))
+                                : p.pkgKey==="combo"
+                                  ? (()=>{
+                                      const refLeft = comboTypeLeft(p,"reformer");
+                                      const matLeft = comboTypeLeft(p,"mat");
+                                      return `🛏️ ${refLeft} Reformer · 🧘 ${matLeft} Mat`;
+                                    })()
+                                  : `${pkgSessionsLeft(p)} ${t.classesLeft}`}
+                            </div>
+                          </div>
+                          {daysLeft != null && (
+                            <div style={{textAlign:"right",fontSize:11,color:daysLeft<=7?C.red:C.textLight}}>
+                              {t.expiresIn} {daysLeft}{t.daysShort}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {/* Show unpaid pending packages too as warning */}
+                  {userPkgs.filter(p=>!p.paid).map((p,idx)=>{
+                    const pkg = PACKAGES[p.pkgKey];
+                    return (
+                      <div key={`u${idx}`} style={{...S.card,borderLeft:`4px solid ${C.amber}`,padding:"10px 14px",background:C.amberPale}}>
+                        <div style={{fontSize:12,color:C.amber}}>⚠️ {pkg.icon} {p.label} — {t.pendingPayment}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })()}
 
+            {/* Week navigation */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,padding:"6px 4px"}}>
+              <button onClick={()=>setWeekOffset(Math.max(0, weekOffset-1))} disabled={weekOffset===0} style={{background:"none",border:"none",fontSize:18,color:weekOffset===0?C.borderMid:C.wine,cursor:weekOffset===0?"not-allowed":"pointer",padding:"4px 8px"}}>‹</button>
+              <div style={{fontSize:11,color:C.textMid,fontWeight:weekOffset===0?"bold":"normal"}}>
+                {weekOffset===0 ? t.thisWeek : weekOffset===1 ? t.nextWeek : `${t.inWeeks} ${weekOffset} ${weekOffset===1?t.weekN:t.weeksN}`}
+              </div>
+              <button onClick={()=>setWeekOffset(Math.min(3, weekOffset+1))} disabled={weekOffset>=3} style={{background:"none",border:"none",fontSize:18,color:weekOffset>=3?C.borderMid:C.wine,cursor:weekOffset>=3?"not-allowed":"pointer",padding:"4px 8px"}}>›</button>
+            </div>
+
             <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto",paddingBottom:4}}>
               {DAYS.map(day=>{
-                const hasMine = SCHEDULE[day].some(s=>isBookedBy(day,s.time,currentUser));
+                const dDate = dateForDayInWeek(day, weekOffset);
+                const hasMine = SCHEDULE[day].some(s=>isBookedBy(day,s.time,currentUser,dDate));
                 return (
                   <button key={day} onClick={()=>setSelectedDay(day)} style={{flexShrink:0,padding:"8px 12px",borderRadius:18,fontSize:11,fontFamily:"Georgia,serif",cursor:"pointer",background:selectedDay===day?C.wine:"#fff",color:selectedDay===day?"#fff":C.textMid,border:selectedDay===day?"none":`1px solid ${C.border}`,fontWeight:selectedDay===day?"bold":"normal",position:"relative"}}>
-                    {shortDayLabel(day,lang)}
+                    {shortDayLabel(day,lang,weekOffset)}
                     {hasMine&&<span style={{position:"absolute",top:3,right:3,width:5,height:5,borderRadius:"50%",background:C.green}}/>}
                   </button>
                 );
@@ -1084,40 +2785,99 @@ export default function NoaPilates() {
             </div>
 
             <div style={{fontSize:15,color:C.wine,fontWeight:"bold",marginBottom:13,letterSpacing:.5}}>
-              {dayLabel(selectedDay,lang)}
+              {dayLabel(selectedDay,lang,weekOffset)}
             </div>
 
             {SCHEDULE[selectedDay].map((slot,i)=>{
-              const left = spotsLeft(selectedDay,slot.time);
-              const booked = isBookedBy(selectedDay,slot.time,currentUser);
+              const targetDate = dateForDayInWeek(selectedDay, weekOffset);
+              const left = spotsLeft(selectedDay,slot.time,targetDate);
+              const booked = isBookedBy(selectedDay,slot.time,currentUser,targetDate);
               const full = left===0&&!booked;
               const open = isOpen(selectedDay,slot.time);
               const locked = !open&&!booked;
               const cs = CLASS_STYLE[slot.name]||CLASS_STYLE.Reformer;
               const ts = slot.tag?(TAG_STYLE[slot.tag]||{}):null;
+
+              // Credit check for this specific slot
+              const userPkgs = myPkgsFor(currentUser);
+              const { pkg: usable, reason: creditReason } = booked || full || locked
+                ? { pkg:null, reason:"skip" }
+                : findUsablePackage(userPkgs, slot.name, targetDate);
+              const noCredit = !booked && !full && !locked && !usable;
+              const creditMsg = noCredit
+                ? (creditReason==="wrongType" ? t.noCreditForType
+                  : creditReason==="notPaid" ? t.pkgNotPaid
+                  : creditReason==="expired" ? t.pkgExpired
+                  : creditReason==="weekLimit" ? t.pkgWeeklyLimit
+                  : creditReason==="noSessionsLeft" ? t.pkgNoSessionsLeft
+                  : t.contactToBook)
+                : null;
+
+              // Waitlist info (use targetDate for the slot key)
+              const slotKeyVal = slotKey(selectedDay, slot.time, targetDate);
+              const waitEntry = (waitlist[slotKeyVal] || []).find(w => w.email === currentUser) || null;
+              const queue = waitlist[slotKeyVal] || [];
+              const waitPosition = waitEntry ? queue.findIndex(w => w.email === currentUser) + 1 : 0;
+              const hasOffer = waitEntry?.notified && spotsLeft(selectedDay, slot.time, targetDate) > 0 && queue[0]?.email === currentUser;
+
               return (
-                <div key={i} style={{...S.card,marginBottom:9,borderLeft:`4px solid ${booked?C.green:full||locked?C.borderMid:cs.color}`,opacity:(full||locked)&&!booked?.6:1,animation:`fadeUp .28s ease ${i*.07}s both`}}>
+                <div key={i} style={{...S.card,marginBottom:9,borderLeft:`4px solid ${booked?C.green:hasOffer?C.amber:full||locked||noCredit?C.borderMid:cs.color}`,opacity:(full||locked||noCredit)&&!booked&&!waitEntry?.7:1,animation:`fadeUp .28s ease ${i*.07}s both`}}>
                   <div style={{display:"flex",alignItems:"center",gap:11,padding:"12px 15px"}}>
-                    <div style={{width:42,flexShrink:0,fontSize:14,fontWeight:"bold",color:booked?C.green:locked?C.textLight:cs.color}}>{slot.time}</div>
+                    <div style={{width:42,flexShrink:0,fontSize:14,fontWeight:"bold",color:booked?C.green:locked||noCredit?C.textLight:cs.color}}>{slot.time}</div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                         <span style={{fontSize:13,color:C.text}}>{slot.name}</span>
                         {slot.tag&&<span style={{...S.pill,background:ts.bg,color:ts.color,border:`1px solid ${ts.border}`}}>✦ {slot.tag}</span>}
+                        {slot.instructor&&<span style={{...S.pill,background:C.surfaceAlt,color:C.textMid,border:`1px solid ${C.border}`,fontSize:10}}>👩‍🏫 {slot.instructor}</span>}
                       </div>
                       <div style={{display:"flex",gap:7,marginTop:5,alignItems:"center",flexWrap:"wrap"}}>
                         <span style={{fontSize:11,color:C.textLight}}>⏱ {slot.tag==="Mom & Baby"?t.momBabyDuration:t.oneHour}</span>
                         <span style={{...S.pill,background:booked?C.greenPale:locked||full?C.redPale:left<=2?C.amberPale:C.surfaceAlt,color:booked?C.green:locked||full?C.red:left<=2?C.amber:C.textLight,border:`1px solid ${booked?C.greenBorder:locked||full?C.redBorder:left<=2?C.amberBorder:C.border}`}}>
                           {booked?t.booked:locked?t.closed:full?t.full:`${left} ${t.left}`}
                         </span>
-                        {!booked&&open&&!full&&<span style={{fontSize:10,color:C.textLight}}>{deadlineLabel(selectedDay,slot.time,lang)}</span>}
+                        {!booked&&open&&!full&&weekOffset===0&&<span style={{fontSize:10,color:C.textLight}}>{deadlineLabel(selectedDay,slot.time,lang)}</span>}
                       </div>
+                      {noCredit && !waitEntry && (
+                        <div style={{marginTop:6,fontSize:11,color:C.amber,background:C.amberPale,border:`1px solid ${C.amberBorder}`,borderRadius:8,padding:"4px 9px",display:"inline-block"}}>
+                          🔒 {creditMsg}
+                        </div>
+                      )}
+                      {waitEntry && !hasOffer && (
+                        <div style={{marginTop:6,fontSize:11,color:C.wine,background:C.winePale,border:`1px solid ${C.borderMid}`,borderRadius:8,padding:"4px 9px",display:"inline-block"}}>
+                          ⏳ {t.onWaitlist} · {t.waitlistPosition} {waitPosition}/{queue.length}
+                        </div>
+                      )}
+                      {hasOffer && (
+                        <div style={{marginTop:6,fontSize:11,color:C.amber,background:C.amberPale,border:`1px solid ${C.amberBorder}`,borderRadius:8,padding:"5px 10px",display:"inline-block",fontWeight:"bold"}}>
+                          {t.spotAvailable}
+                          {(() => {
+                            const tl = waitlistTimeLeft(selectedDay, slot.time, currentUser);
+                            if (tl == null) return null;
+                            return <span style={{fontWeight:"normal",marginLeft:6,fontSize:10}}>⏰ {t.confirmIn} {formatTimeLeft(tl)}</span>;
+                          })()}
+                        </div>
+                      )}
                     </div>
                     <div style={{flexShrink:0}}>
                       {booked
                         ? open
-                          ? <button onClick={()=>cancelBooking(selectedDay,slot.time)} style={S.cancelBtn}>{t.cancel}</button>
+                          ? <button onClick={()=>cancelBooking(selectedDay,slot.time,currentUser,targetDate)} style={S.cancelBtn}>{t.cancel}</button>
                           : <span style={{...S.pill,background:C.amberPale,color:C.amber,border:`1px solid ${C.amberBorder}`,padding:"5px 10px"}}>{t.locked}</span>
-                        : <button onClick={()=>bookClass(selectedDay,slot)} disabled={full||locked} style={{...S.bookBtn,opacity:full||locked?.4:1,cursor:full||locked?"not-allowed":"pointer"}}>{full?t.full:locked?t.closed:t.book}</button>
+                        : hasOffer
+                          ? <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                              <button onClick={()=>acceptWaitlistOffer(selectedDay,slot.time,targetDate)} style={{...S.bookBtn,padding:"6px 12px",fontSize:11,background:`linear-gradient(135deg,${C.amber},${C.amberDark||"#b8860b"})`}}>✓ {t.confirmSpot}</button>
+                              <button onClick={()=>leaveWaitlist(selectedDay,slot.time,currentUser,targetDate)} style={{...S.cancelBtn,padding:"4px 10px",fontSize:10}}>{t.declineSpot}</button>
+                            </div>
+                        : waitEntry
+                          ? <button onClick={()=>leaveWaitlist(selectedDay,slot.time,currentUser,targetDate)} style={{...S.outlineBtn,padding:"6px 12px",fontSize:11}}>{t.leaveWaitlist}</button>
+                        : full && open && !noCredit
+                          ? <button onClick={()=>joinWaitlist(selectedDay,slot.time,targetDate)} style={{...S.outlineBtn,padding:"6px 12px",fontSize:11,color:C.wine,borderColor:C.borderMid}}>⏳ {t.joinWaitlist}</button>
+                          : <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                              <button onClick={()=>bookClass(selectedDay,slot,targetDate)} disabled={full||locked||noCredit} style={{...S.bookBtn,opacity:full||locked||noCredit?.4:1,cursor:full||locked||noCredit?"not-allowed":"pointer"}}>{full?t.full:locked?t.closed:noCredit?"🔒":t.book}</button>
+                              {!full && !locked && !noCredit && weekOffset < 3 && (
+                                <button onClick={()=>{setShowRecurringModal({day:selectedDay,slot,startWeekOffset:weekOffset});setRecurringWeeks(2);}} style={{background:"none",border:"none",color:C.wine,fontSize:9,cursor:"pointer",padding:"2px 6px",textDecoration:"underline"}} title={t.bookRecurring}>🔁 {lang==="pt"?"várias":"more weeks"}</button>
+                              )}
+                            </div>
                       }
                     </div>
                   </div>
@@ -1126,6 +2886,7 @@ export default function NoaPilates() {
                       <div key={j} style={{width:7,height:7,borderRadius:"50%",background:j<(MAX_SPOTS(slot.name)-left)?(booked?C.green:C.wine):C.border}}/>
                     ))}
                     <span style={{fontSize:9,color:C.textLight,marginLeft:4}}>{left} {t.left}</span>
+                    {queue.length > 0 && <span style={{fontSize:9,color:C.wine,marginLeft:4}}>· ⏳ {queue.length} {t.waitlistFor.toLowerCase()}</span>}
                   </div>
                 </div>
               );
@@ -1155,8 +2916,10 @@ export default function NoaPilates() {
                   const pkg=PACKAGES[p.pkgKey];
                   const done=p.sessions.length;
                   const finished=isFinished(p);
+                  const valid = pkgIsValid(p);
+                  const daysLeft = pkgDaysLeft(p);
                   return (
-                    <div key={i} style={{...S.card,marginBottom:13,borderLeft:`4px solid ${pkg.color}`,animation:`fadeUp .28s ease ${i*.07}s both`}}>
+                    <div key={i} style={{...S.card,marginBottom:13,borderLeft:`4px solid ${pkg.color}`,opacity:!valid?.65:1,animation:`fadeUp .28s ease ${i*.07}s both`}}>
                       <div style={{padding:"13px 15px"}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9}}>
                           <div style={{flex:1}}>
@@ -1164,6 +2927,8 @@ export default function NoaPilates() {
                               <span style={{...S.pill,background:pkg.bg,color:pkg.color,border:`1px solid ${pkg.border}`}}>{pkg.icon} {pkg.label}</span>
                               {finished&&<span style={{...S.pill,background:C.greenPale,color:C.green,border:`1px solid ${C.greenBorder}`}}>{t.done}</span>}
                               {!p.paid&&<span style={{...S.pill,background:C.amberPale,color:C.amber,border:`1px solid ${C.amberBorder}`}}>{t.unpaid}</span>}
+                              {!valid&&<span style={{...S.pill,background:C.redPale,color:C.red,border:`1px solid ${C.redBorder}`}}>⏰ {t.pkgExpired}</span>}
+                              {valid&&daysLeft!=null&&daysLeft<=7&&<span style={{...S.pill,background:C.amberPale,color:C.amber,border:`1px solid ${C.amberBorder}`}}>{t.expiresIn} {daysLeft}{t.daysShort}</span>}
                             </div>
                             <div style={{fontSize:13,color:C.text,marginTop:6}}>{p.label}</div>
                             <div style={{fontSize:11,color:C.textLight,marginTop:2}}>{t.started} {p.startDate}{p.validity?` · ${p.validity}`:""}</div>
@@ -1173,6 +2938,17 @@ export default function NoaPilates() {
                             <div style={{fontSize:11,color:p.paid?C.green:C.amber}}>{p.paid?`${t.paid} ${p.paidDate}`:t.pendingPayment}</div>
                           </div>
                         </div>
+                        {/* Combo: show per-type counters */}
+                        {p.pkgKey==="combo" && p.qty && (
+                          <div style={{display:"flex",gap:10,marginBottom:9,fontSize:12,color:C.textMid}}>
+                            <div style={{flex:1,padding:"6px 10px",background:C.winePale,borderRadius:7,border:`1px solid ${C.borderMid}`}}>
+                              🛏️ Reformer: <b style={{color:C.wine}}>{comboTypeLeft(p,"reformer")}</b> {t.classesLeft}
+                            </div>
+                            <div style={{flex:1,padding:"6px 10px",background:C.greenPale,borderRadius:7,border:`1px solid ${C.greenBorder}`}}>
+                              🧘 Mat: <b style={{color:C.green}}>{comboTypeLeft(p,"mat")}</b> {t.classesLeft}
+                            </div>
+                          </div>
+                        )}
                         {p.qty&&(
                           <div>
                             <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
@@ -1244,7 +3020,10 @@ export default function NoaPilates() {
         {/* PROFILE TAB */}
         {tab==="profile" && (
           <div>
-            <h2 style={S.pageTitle}>{t.myProfile}</h2>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <h2 style={S.pageTitle}>{t.myProfile}</h2>
+              <button onClick={openEditProfile} style={{...S.outlineBtn,fontSize:12,padding:"7px 13px"}}>✏️ {t.editProfile}</button>
+            </div>
 
             <div style={{...S.card,padding:"18px 18px",marginBottom:16,display:"flex",alignItems:"center",gap:14}}>
               <div style={{width:54,height:54,borderRadius:"50%",background:`linear-gradient(135deg,${C.wineLight},${C.wine})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,color:"#fff",fontWeight:"bold",flexShrink:0}}>
@@ -1261,6 +3040,15 @@ export default function NoaPilates() {
               <div style={{display:"grid",gridTemplateColumns:"100px 1fr",gap:7,fontSize:13}}>
                 <div style={{color:C.textLight}}>{t.email}:</div><div style={{color:C.text}}>{me.email}</div>
                 <div style={{color:C.textLight}}>{t.phone}:</div><div style={{color:C.text}}>{me.phone||"—"}</div>
+                {me.bdayDay && me.bdayMonth ? (
+                  <>
+                    <div style={{color:C.textLight}}>🎂 {t.birthday}:</div>
+                    <div style={{color:C.text}}>
+                      {String(me.bdayDay).padStart(2,"0")}/{String(me.bdayMonth).padStart(2,"0")}
+                      {isBirthdayToday(me) && <span style={{marginLeft:8,color:C.amber,fontWeight:"bold"}}>🎉 {t.happyBirthday}!</span>}
+                    </div>
+                  </>
+                ) : null}
                 <div style={{color:C.textLight}}>{t.joined}:</div><div style={{color:C.text}}>{me.joinedAt}</div>
               </div>
             </div>
@@ -1291,7 +3079,102 @@ export default function NoaPilates() {
         )}
       </div>
 
+      {/* EDIT PROFILE MODAL (CLIENT) */}
+      {showEditProfile && (
+        <div style={S.overlay} onClick={()=>setShowEditProfile(false)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,fontSize:16,color:C.text}}>✏️ {t.editProfile}</h3>
+              <button onClick={()=>setShowEditProfile(false)} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+            </div>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.name}</label>
+            <input value={epName} onChange={e=>setEpName(e.target.value)} style={{...S.input,marginBottom:10}}/>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.phone}</label>
+            <input value={epPhone} onChange={e=>setEpPhone(e.target.value)} style={{...S.input,marginBottom:10}} type="tel"/>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>🎂 {t.birthday}</label>
+            <div style={{display:"flex",gap:6,marginBottom:14}}>
+              <input value={epBdayDay} onChange={e=>setEpBdayDay(e.target.value.replace(/\D/g,"").slice(0,2))} placeholder={t.day} style={{...S.input,flex:1,marginBottom:0}} type="number" min="1" max="31"/>
+              <input value={epBdayMonth} onChange={e=>setEpBdayMonth(e.target.value.replace(/\D/g,"").slice(0,2))} placeholder={t.month} style={{...S.input,flex:1,marginBottom:0}} type="number" min="1" max="12"/>
+            </div>
+            <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginBottom:10}}>
+              <div style={{fontSize:11,color:C.textLight,marginBottom:8}}>🔐 {lang==="pt"?"Alterar palavra-passe (opcional)":"Change password (optional)"}</div>
+              <input value={epCurrentPwd} onChange={e=>setEpCurrentPwd(e.target.value)} placeholder={t.currentPassword} type="password" style={{...S.input,marginBottom:8}}/>
+              <input value={epNewPwd} onChange={e=>setEpNewPwd(e.target.value)} placeholder={t.newPasswordOpt} type="password" style={{...S.input,marginBottom:8}}/>
+              <input value={epConfirmPwd} onChange={e=>setEpConfirmPwd(e.target.value)} placeholder={t.confirmNewPasswordOpt} type="password" style={S.input}/>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:14}}>
+              <button onClick={()=>setShowEditProfile(false)} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
+              <button onClick={saveEditProfile} style={{...S.wineBtn,flex:1,padding:"10px",marginTop:0}}>{t.saveProfile}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECURRING BOOKING MODAL */}
+      {showRecurringModal && (
+        <div style={S.overlay} onClick={()=>setShowRecurringModal(null)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <h3 style={{margin:0,fontSize:16,color:C.text}}>🔁 {t.recurringTitle}</h3>
+              <button onClick={()=>setShowRecurringModal(null)} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+            </div>
+            <p style={{margin:"0 0 14px",fontSize:12,color:C.textLight,lineHeight:1.5}}>
+              {t.recurringDesc}
+              <br/>
+              <strong style={{color:C.wine}}>{showRecurringModal.slot.time} {showRecurringModal.slot.name}</strong>
+              {" "}({t.days[showRecurringModal.day]})
+            </p>
+            <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.recurringWeeksLabel}</label>
+            <div style={{display:"flex",gap:6,marginBottom:14}}>
+              {[1,2,3,4].map(n=>(
+                <button key={n} onClick={()=>setRecurringWeeks(n)} disabled={(showRecurringModal.startWeekOffset||0)+n > 4} style={{flex:1,padding:"10px",borderRadius:8,fontSize:13,fontFamily:"Georgia,serif",cursor:(showRecurringModal.startWeekOffset||0)+n > 4 ? "not-allowed":"pointer",background:recurringWeeks===n?C.wine:"#fff",color:recurringWeeks===n?"#fff":C.textMid,border:`1px solid ${recurringWeeks===n?C.wine:C.border}`,opacity:(showRecurringModal.startWeekOffset||0)+n > 4 ? 0.4 : 1}}>{n}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setShowRecurringModal(null)} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
+              <button onClick={()=>bookRecurring(showRecurringModal.day, showRecurringModal.slot, recurringWeeks)} style={{...S.wineBtn,flex:1,padding:"10px",marginTop:0}}>{t.bookAll}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{CSS}</style>
+    </div>
+  );
+}
+
+// ── ADMIN SETTINGS MODAL ──────────────────────────────────────────────
+function AdminSettingsModal({ adminAccount, lang, t, onClose, onSave }) {
+  const [newEmail, setNewEmail] = useState(adminAccount?.email || "");
+  const [curPwd, setCurPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const submit = () => {
+    if (newPwd && newPwd !== confirmPwd) { alert(lang==="pt"?"Palavras-passe não coincidem":"Passwords don't match"); return; }
+    onSave(newEmail, curPwd, newPwd);
+  };
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modal} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <h3 style={{margin:0,fontSize:16,color:C.text}}>⚙ {t.adminSettings}</h3>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:C.textLight,cursor:"pointer"}}>×</button>
+        </div>
+        <p style={{fontSize:11,color:C.textLight,marginBottom:14,lineHeight:1.5}}>
+          {lang==="pt"?"Atualizar email ou palavra-passe do admin. Para confirmar, insere a palavra-passe atual.":"Update admin email or password. Enter current password to confirm."}
+        </p>
+        <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.email}</label>
+        <input value={newEmail} onChange={e=>setNewEmail(e.target.value)} type="email" style={{...S.input,marginBottom:10}}/>
+        <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.currentPassword}</label>
+        <input value={curPwd} onChange={e=>setCurPwd(e.target.value)} type="password" style={{...S.input,marginBottom:10}}/>
+        <label style={{fontSize:11,color:C.textLight,display:"block",marginBottom:4}}>{t.newPasswordOpt}</label>
+        <input value={newPwd} onChange={e=>setNewPwd(e.target.value)} type="password" style={{...S.input,marginBottom:10}}/>
+        <input value={confirmPwd} onChange={e=>setConfirmPwd(e.target.value)} placeholder={t.confirmNewPasswordOpt} type="password" style={S.input}/>
+        <div style={{display:"flex",gap:8,marginTop:14}}>
+          <button onClick={onClose} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
+          <button onClick={submit} style={{...S.wineBtn,flex:1,padding:"10px",marginTop:0}}>{t.saveChanges}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1340,4 +3223,40 @@ const CSS = `
   input:focus, select:focus { border-color:#9a4a5a !important; box-shadow:0 0 0 3px rgba(154,74,90,.1) !important; }
   ::-webkit-scrollbar { width:4px; height:4px; }
   ::-webkit-scrollbar-thumb { background:#e0cece; border-radius:4px; }
+
+  /* DARK MODE OVERRIDES — applied when body has [data-theme="dark"] */
+  body[data-theme="dark"] { background:#1a0f14 !important; color:#f0e0e5; }
+  body[data-theme="dark"] [style*="background: rgb(255, 255, 255)"],
+  body[data-theme="dark"] [style*="background:#fff"],
+  body[data-theme="dark"] [style*="background: #fff"] {
+    background:#2a1820 !important;
+  }
+  body[data-theme="dark"] [style*="background: rgb(245, 240, 235)"],
+  body[data-theme="dark"] [style*="background:#f5f0eb"] {
+    background:#1a0f14 !important;
+  }
+  body[data-theme="dark"] [style*="background: rgb(250, 247, 244)"],
+  body[data-theme="dark"] [style*="background:#faf7f4"] {
+    background:#221318 !important;
+  }
+  body[data-theme="dark"] [style*="color: rgb(61, 31, 40)"],
+  body[data-theme="dark"] [style*="color:#3d1f28"] {
+    color:#f0e0e5 !important;
+  }
+  body[data-theme="dark"] [style*="color: rgb(122, 74, 85)"],
+  body[data-theme="dark"] [style*="color:#7a4a55"] {
+    color:#c8a0b0 !important;
+  }
+  body[data-theme="dark"] [style*="color: rgb(176, 144, 144)"],
+  body[data-theme="dark"] [style*="color:#b09090"] {
+    color:#7a5a65 !important;
+  }
+  body[data-theme="dark"] [style*="border: 1px solid rgb(232, 216, 220)"],
+  body[data-theme="dark"] [style*="border:1px solid #e8d8dc"] {
+    border-color:#3d2330 !important;
+  }
+  body[data-theme="dark"] input, body[data-theme="dark"] select, body[data-theme="dark"] textarea {
+    background:#221318 !important; color:#f0e0e5 !important; border-color:#3d2330 !important;
+  }
+  body[data-theme="dark"] ::-webkit-scrollbar-thumb { background:#4a2c3a; }
 `;
