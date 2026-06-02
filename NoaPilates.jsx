@@ -1010,6 +1010,39 @@ export default function NoaPilates() {
     return () => unsub();
   }, [currentUser]);
 
+  // ── FIRESTORE LIVE: BOOKINGS ───────────────────────────────────────
+  // Subscribe to all bookings. Documents have `classKey` ("YYYY-MM-DD|HH:MM")
+  // and we group by that into the slotKey-indexed object the UI already expects.
+  useEffect(() => {
+    if (!currentUser) {
+      setBookings({});
+      return;
+    }
+    const unsub = onSnapshot(
+      collection(db, "bookings"),
+      (snap) => {
+        const grouped = {};
+        snap.forEach((docSnap) => {
+          const data = docSnap.data();
+          const k = data?.classKey;
+          if (!k) return;
+          if (!grouped[k]) grouped[k] = [];
+          // Keep the firestoreId so we can delete later when cancelling
+          grouped[k].push({ ...data, firestoreId: docSnap.id });
+        });
+        // Sort each slot's bookings by timestamp so ordering is stable
+        Object.keys(grouped).forEach(k => {
+          grouped[k].sort((a, b) => (a.ts || "").localeCompare(b.ts || ""));
+        });
+        setBookings(grouped);
+      },
+      (err) => {
+        console.error("bookings listener error:", err);
+      }
+    );
+    return () => unsub();
+  }, [currentUser]);
+
   // Auth form
   const [fName, setFName] = useState("");
   const [fUsername, setFUsername] = useState("");
@@ -1027,7 +1060,8 @@ export default function NoaPilates() {
   const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, max 3 (4 weeks ahead)
 
   // PERSISTED data
-  const [bookings, setBookings] = useP("bookings", {});
+  // bookings now from Firestore — live subscription
+  const [bookings, setBookings] = useState({});  // { [slotKey]: [ {email, ts, classDate, ...} ] }
   // clientPkgs now from Firestore — live subscription
   const [clientPkgs, setClientPkgs] = useState({});  // { email: [ {id, pkgKey, qty, sessions, paid, ...} ] }
   const [PACKAGES, setPackages] = useP("packages_config", DEFAULT_PACKAGES);
@@ -1103,16 +1137,15 @@ export default function NoaPilates() {
   const [adminNewPassword, setAdminNewPassword] = useState("");
 
   // Auto-save persisted state whenever it changes.
-  // users and clientPkgs now live in Firestore — no longer persisted here.
+  // users, clientPkgs and bookings now live in Firestore — no longer persisted here.
   useEffect(() => {
     saveState({
       resetTokens, adminAccount, lang,
-      bookings,
       packages_config: PACKAGES, schedule_config: SCHEDULE,
       waitlist, noShows, clientNotes,
       instructors, freezes,
     });
-  }, [resetTokens, adminAccount, lang, bookings, PACKAGES, SCHEDULE, waitlist, noShows, clientNotes, instructors, freezes]);
+  }, [resetTokens, adminAccount, lang, PACKAGES, SCHEDULE, waitlist, noShows, clientNotes, instructors, freezes]);
 
   const [toast, setToast] = useState(null);
   const t = T[lang];
@@ -1439,69 +1472,101 @@ export default function NoaPilates() {
         else fire(t.noCreditDesc,"warn");
         return;
       }
-      // Register the booking (bookings still in localStorage for now — Phase 2B)
-      setBookings(prev=>({...prev,[sk]:[...(prev[sk]||[]),{email:currentUser,ts:new Date().toISOString(),classDate:dateStr}]}));
-      // Log session into the chosen package — write to Firestore so it persists across devices
-      const newSession = {id:Date.now(), date:fmt(d), class:slot.name, time:slot.time, day, classDate:dateStr, bookedTs:d.getTime()};
+      // Write booking to Firestore — onSnapshot will refresh the local bookings state
       try {
+        await addDoc(collection(db, "bookings"), {
+          email: currentUser,
+          classKey: sk,
+          classDate: dateStr,
+          day,
+          time: slot.time,
+          className: slot.name,
+          ts: new Date().toISOString(),
+        });
+        // Log session into the chosen package
+        const newSession = {id:Date.now(), date:fmt(d), class:slot.name, time:slot.time, day, classDate:dateStr, bookedTs:d.getTime()};
         await updateDoc(doc(db, "clientPackages", usable.id), {
           sessions: [...(usable.sessions||[]), newSession],
         });
+        fire(`${t.bookedAnd} ${PACKAGES[usable.pkgKey]?.label} ✓`);
       } catch (err) {
-        console.error("Failed to update package session:", err);
+        fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
       }
-      fire(`${t.bookedAnd} ${PACKAGES[usable.pkgKey]?.label} ✓`);
       return;
     }
 
     // ADMIN PATH — book without credit check
-    setBookings(prev=>({...prev,[sk]:[...(prev[sk]||[]),{email:currentUser,ts:new Date().toISOString(),classDate:dateStr}]}));
-    fire(`${slot.time} ${slot.name} ${lang==="pt"?"marcado!":"booked!"}`);
+    try {
+      await addDoc(collection(db, "bookings"), {
+        email: currentUser,
+        classKey: sk,
+        classDate: dateStr,
+        day,
+        time: slot.time,
+        className: slot.name,
+        ts: new Date().toISOString(),
+        byAdmin: true,
+      });
+      fire(`${slot.time} ${slot.name} ${lang==="pt"?"marcado!":"booked!"}`);
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
   // Book the same class for N upcoming weeks. Validates each week independently.
   const bookRecurring = async (day, slot, weeks) => {
     if (!weeks || weeks <= 0) return;
     let booked = 0, skipped = 0;
-    // Compute target dates: starting from current weekOffset, then +1, +2, ...
     const occurrences = [];
     for (let w = 0; w < weeks; w++) {
       occurrences.push(dateForDayInWeek(day, weekOffset + w));
     }
 
-    // Local mutations for bookings (still in localStorage) and pending Firestore updates.
-    const newBookings = {...bookings};
-    // Track per-package updates to make at the end (one updateDoc per package, batching all sessions)
+    // Track planned booking writes and per-package session updates
+    const bookingWrites = [];  // array of {sk, dateStr, occDate}
     const pkgUpdates = {};  // pkgId -> updated sessions array
-    // Working copy of clientPkgs so credit checks see prior bookings in this loop
+    // Working copy of bookings + clientPkgs so credit & spot checks see prior bookings in this loop
+    const workingBookings = { ...bookings };
     const workingPkgs = { [currentUser]: (clientPkgs[currentUser]||[]).map(p => ({...p, sessions: [...(p.sessions||[])]})) };
 
     for (const occDate of occurrences) {
       const sk = slotKey(day, slot.time, occDate);
       const dateStr = isoDate(occDate);
-      if ((newBookings[sk]||[]).find(b => b.email === currentUser)) { skipped++; continue; }
-      if ((newBookings[sk]||[]).length >= MAX_SPOTS(slot.name)) { skipped++; continue; }
+      if ((workingBookings[sk]||[]).find(b => b.email === currentUser)) { skipped++; continue; }
+      if ((workingBookings[sk]||[]).length >= MAX_SPOTS(slot.name)) { skipped++; continue; }
       const { pkg: usable } = findUsablePackage(workingPkgs[currentUser], slot.name, occDate);
       if (!usable) { skipped++; continue; }
-      newBookings[sk] = [...(newBookings[sk]||[]), {email: currentUser, ts: new Date().toISOString(), classDate: dateStr}];
+      workingBookings[sk] = [...(workingBookings[sk]||[]), {email: currentUser, ts: new Date().toISOString(), classDate: dateStr}];
       const newSession = {id: Date.now()+Math.random(), date: fmt(occDate), class: slot.name, time: slot.time, day, classDate: dateStr, bookedTs: occDate.getTime()};
-      // Update working copy so the next iteration's credit check is accurate
       workingPkgs[currentUser] = workingPkgs[currentUser].map(p => p.id === usable.id
         ? {...p, sessions: [...(p.sessions||[]), newSession]}
         : p);
-      // Queue Firestore update for this package
       pkgUpdates[usable.id] = workingPkgs[currentUser].find(p => p.id === usable.id).sessions;
+      bookingWrites.push({ sk, dateStr, occDate });
       booked++;
     }
 
-    setBookings(newBookings);
-    // Commit all package updates to Firestore in parallel
+    // Commit booking writes + package updates to Firestore in parallel
     try {
-      await Promise.all(Object.entries(pkgUpdates).map(([pkgId, sessions]) =>
-        updateDoc(doc(db, "clientPackages", pkgId), { sessions })
-      ));
+      await Promise.all([
+        ...bookingWrites.map(({sk, dateStr}) => addDoc(collection(db, "bookings"), {
+          email: currentUser,
+          classKey: sk,
+          classDate: dateStr,
+          day,
+          time: slot.time,
+          className: slot.name,
+          ts: new Date().toISOString(),
+          recurring: true,
+        })),
+        ...Object.entries(pkgUpdates).map(([pkgId, sessions]) =>
+          updateDoc(doc(db, "clientPackages", pkgId), { sessions })
+        ),
+      ]);
     } catch (err) {
-      console.error("Recurring booking package update failed:", err);
+      console.error("Recurring booking failed:", err);
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+      return;
     }
     setShowRecurringModal(null);
 
@@ -1517,12 +1582,20 @@ export default function NoaPilates() {
     if (!isAdmin && !isOpen(day,time)) { fire(t.cancellationClosed,"warn"); return; }
     const sk = slotKey(day,time,d);
     const dateStr = isoDate(d);
-    // Remove from bookings (still localStorage for now)
-    setBookings(prev=>({...prev,[sk]:(prev[sk]||[]).filter(b=>b.email!==email)}));
+    // Find this user's booking doc in Firestore for this slot and delete it
+    const existingBooking = (bookings[sk] || []).find(b => b.email === email);
+    if (existingBooking?.firestoreId) {
+      try {
+        await deleteDoc(doc(db, "bookings", existingBooking.firestoreId));
+      } catch (err) {
+        console.error("Failed to delete booking:", err);
+        fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+        return;
+      }
+    }
     // Return credit: find the package + session and update in Firestore
     const userList = clientPkgs[email];
     if (userList) {
-      // Find the package that has this session
       for (const p of userList) {
         const idx = (p.sessions||[]).findIndex(s =>
           (s.classDate ? s.classDate === dateStr && s.time===time : s.day===day && s.time===time)
@@ -1539,7 +1612,7 @@ export default function NoaPilates() {
         }
       }
     }
-    // Notify the next person on the waitlist (if any).
+    // Notify the next person on the waitlist (if any). [Waitlist still localStorage — Phase 2B.2]
     setWaitlist(prev => {
       const queue = prev[sk] || [];
       if (queue.length === 0) return prev;
@@ -1668,22 +1741,34 @@ export default function NoaPilates() {
       fire(reason==="notPaid"?t.pkgNotPaid:reason==="expired"?t.pkgExpired:t.noCreditDesc,"warn");
       return;
     }
-    setBookings(prev => ({...prev, [sk]: [...(prev[sk]||[]), {email: currentUser, ts: new Date().toISOString(), classDate: dateStr}]}));
     // Log session in Firestore
     const newSession = {id:Date.now(), date:fmt(d), class:slot.name, time:slot.time, day, classDate:dateStr, bookedTs:d.getTime()};
     try {
+      // Write booking to Firestore
+      await addDoc(collection(db, "bookings"), {
+        email: currentUser,
+        classKey: sk,
+        classDate: dateStr,
+        day,
+        time: slot.time,
+        className: slot.name,
+        ts: new Date().toISOString(),
+        fromWaitlist: true,
+      });
       await updateDoc(doc(db, "clientPackages", usable.id), {
         sessions: [...(usable.sessions||[]), newSession],
       });
     } catch (err) {
-      console.error("Failed to update package session:", err);
+      console.error("Failed to accept waitlist offer:", err);
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+      return;
     }
     setWaitlist(prev => ({...prev, [sk]: (prev[sk] || []).filter(w => w.email !== currentUser)}));
     setPendingWaitlistOffer(null);
     fire(`✓ ${slot.time} ${slot.name} ${lang==="pt"?"marcada!":"booked!"}`);
   };
 
-  const adminAddBooking = (day, time, email, dateOverride=null) => {
+  const adminAddBooking = async (day, time, email, dateOverride=null) => {
     const d = dateOverride || nextOccurrenceOfDay(day);
     const sk = slotKey(day, time, d);
     const dateStr = isoDate(d);
@@ -1699,8 +1784,23 @@ export default function NoaPilates() {
       if (!confirm(msg)) return;
     }
 
-    const bookingEntry = { email, ts: new Date().toISOString(), byAdmin: true, priorWaitlistCount: queue.length, classDate: dateStr };
-    setBookings(prev => ({...prev, [sk]: [...(prev[sk]||[]), bookingEntry]}));
+    const slot = (SCHEDULE[day]||[]).find(s => s.time === time);
+    try {
+      await addDoc(collection(db, "bookings"), {
+        email,
+        classKey: sk,
+        classDate: dateStr,
+        day,
+        time,
+        className: slot?.name || "",
+        ts: new Date().toISOString(),
+        byAdmin: true,
+        priorWaitlistCount: queue.length,
+      });
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+      return;
+    }
 
     if (queue.find(w => w.email === email)) {
       setWaitlist(prev => {
