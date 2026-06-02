@@ -13,6 +13,13 @@ import {
   setDoc,
   getDoc,
   updateDoc,
+  deleteDoc,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  addDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 
 // ── PERSISTENCE HELPERS ──────────────────────────────────────────────
@@ -884,8 +891,8 @@ const findUsablePackage = (pkgs, className, targetDate) => {
 
 // ─────────────────────────────────────────────────────────────────────
 export default function NoaPilates() {
-  // Auth — PERSISTED
-  const [users, setUsers] = useP("users", {});  // { email: {name, username, email, phone, password, joinedAt} }
+  // Auth — users now comes from Firestore (live subscription) instead of localStorage
+  const [users, setUsers] = useState({});  // { email: {name, username, phone, joinedAt, uid, role, ...} }
   const [resetTokens, setResetTokens] = useP("resetTokens", {});
   const [adminAccount, setAdminAccount] = useP("adminAccount", null);
 
@@ -948,6 +955,61 @@ export default function NoaPilates() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── FIRESTORE LIVE: USERS ──────────────────────────────────────────
+  // Subscribe to the entire /users collection (admin sees all; clients see all
+  // for now — Phase 3 will scope this down with proper rules).
+  // Only attached once the user is signed in (rules require auth).
+  useEffect(() => {
+    if (!currentUser) {
+      setUsers({});
+      return;
+    }
+    const unsub = onSnapshot(
+      collection(db, "users"),
+      (snap) => {
+        const next = {};
+        snap.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data?.email) next[data.email] = { ...data, uid: docSnap.id };
+        });
+        setUsers(next);
+      },
+      (err) => {
+        console.error("users listener error:", err);
+      }
+    );
+    return () => unsub();
+  }, [currentUser]);
+
+  // ── FIRESTORE LIVE: CLIENT PACKAGES ────────────────────────────────
+  // Subscribe to all client packages. Documents have an `email` field that
+  // we group by, so the existing UI keyed by email continues to work.
+  useEffect(() => {
+    if (!currentUser) {
+      setClientPkgs({});
+      return;
+    }
+    const unsub = onSnapshot(
+      collection(db, "clientPackages"),
+      (snap) => {
+        const grouped = {};
+        snap.forEach((docSnap) => {
+          const data = docSnap.data();
+          const email = data?.email;
+          if (!email) return;
+          if (!grouped[email]) grouped[email] = [];
+          // Store the firestoreId so we can update/delete later, while keeping `id` for UI compatibility
+          grouped[email].push({ ...data, id: docSnap.id, firestoreId: docSnap.id });
+        });
+        setClientPkgs(grouped);
+      },
+      (err) => {
+        console.error("clientPackages listener error:", err);
+      }
+    );
+    return () => unsub();
+  }, [currentUser]);
+
   // Auth form
   const [fName, setFName] = useState("");
   const [fUsername, setFUsername] = useState("");
@@ -966,7 +1028,8 @@ export default function NoaPilates() {
 
   // PERSISTED data
   const [bookings, setBookings] = useP("bookings", {});
-  const [clientPkgs, setClientPkgs] = useP("clientPkgs", {});
+  // clientPkgs now from Firestore — live subscription
+  const [clientPkgs, setClientPkgs] = useState({});  // { email: [ {id, pkgKey, qty, sessions, paid, ...} ] }
   const [PACKAGES, setPackages] = useP("packages_config", DEFAULT_PACKAGES);
   const [SCHEDULE, setSchedule] = useP("schedule_config", DEFAULT_SCHEDULE);
 
@@ -1039,16 +1102,17 @@ export default function NoaPilates() {
   const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
   const [adminNewPassword, setAdminNewPassword] = useState("");
 
-  // Auto-save persisted state whenever it changes
+  // Auto-save persisted state whenever it changes.
+  // users and clientPkgs now live in Firestore — no longer persisted here.
   useEffect(() => {
     saveState({
-      users, resetTokens, adminAccount, lang,
-      bookings, clientPkgs,
+      resetTokens, adminAccount, lang,
+      bookings,
       packages_config: PACKAGES, schedule_config: SCHEDULE,
       waitlist, noShows, clientNotes,
       instructors, freezes,
     });
-  }, [users, resetTokens, adminAccount, lang, bookings, clientPkgs, PACKAGES, SCHEDULE, waitlist, noShows, clientNotes, instructors, freezes]);
+  }, [resetTokens, adminAccount, lang, bookings, PACKAGES, SCHEDULE, waitlist, noShows, clientNotes, instructors, freezes]);
 
   const [toast, setToast] = useState(null);
   const t = T[lang];
@@ -1293,12 +1357,13 @@ export default function NoaPilates() {
       return;
     }
     try {
-      // If we have a Firestore UID, update the document in Firestore
+      // Update the document in Firestore — onSnapshot will refresh local `users`
       if (existing.uid) {
         await updateDoc(doc(db, "users", existing.uid), updates);
+      } else {
+        fire(lang==="pt"?"Conta sem ID Firebase":"Account missing Firebase ID","warn");
+        return;
       }
-      // Update local cache as well
-      setUsers(prev=>({...prev,[currentUser]:{...existing, ...updates}}));
       setShowEditProfile(false);
       fire(lang==="pt"?"Perfil atualizado ✓":"Profile updated ✓");
     } catch (err) {
@@ -1352,7 +1417,7 @@ export default function NoaPilates() {
   };
 
   // Booking
-  const bookClass = (day,slot,targetDate=null) => {
+  const bookClass = async (day,slot,targetDate=null) => {
     const d = targetDate || nextOccurrenceOfDay(day);
     if (!isAdmin && !isOpen(day,slot.time)) { fire(t.bookingClosed,"warn"); return; }
     if (spotsLeft(day,slot.time,d)<=0) { fire(t.classFull,"warn"); return; }
@@ -1374,10 +1439,17 @@ export default function NoaPilates() {
         else fire(t.noCreditDesc,"warn");
         return;
       }
-      // Register the booking
+      // Register the booking (bookings still in localStorage for now — Phase 2B)
       setBookings(prev=>({...prev,[sk]:[...(prev[sk]||[]),{email:currentUser,ts:new Date().toISOString(),classDate:dateStr}]}));
-      // Log session into the chosen package
-      setClientPkgs(prev=>({...prev,[currentUser]:prev[currentUser].map(p=>p.id===usable.id?{...p,sessions:[...p.sessions,{id:Date.now(),date:fmt(d),class:slot.name,time:slot.time,day,classDate:dateStr,bookedTs:d.getTime()}]}:p)}));
+      // Log session into the chosen package — write to Firestore so it persists across devices
+      const newSession = {id:Date.now(), date:fmt(d), class:slot.name, time:slot.time, day, classDate:dateStr, bookedTs:d.getTime()};
+      try {
+        await updateDoc(doc(db, "clientPackages", usable.id), {
+          sessions: [...(usable.sessions||[]), newSession],
+        });
+      } catch (err) {
+        console.error("Failed to update package session:", err);
+      }
       fire(`${t.bookedAnd} ${PACKAGES[usable.pkgKey]?.label} ✓`);
       return;
     }
@@ -1388,7 +1460,7 @@ export default function NoaPilates() {
   };
 
   // Book the same class for N upcoming weeks. Validates each week independently.
-  const bookRecurring = (day, slot, weeks) => {
+  const bookRecurring = async (day, slot, weeks) => {
     if (!weeks || weeks <= 0) return;
     let booked = 0, skipped = 0;
     // Compute target dates: starting from current weekOffset, then +1, +2, ...
@@ -1397,32 +1469,40 @@ export default function NoaPilates() {
       occurrences.push(dateForDayInWeek(day, weekOffset + w));
     }
 
-    // Build new state mutations locally then commit at the end (avoids stale state in loops).
+    // Local mutations for bookings (still in localStorage) and pending Firestore updates.
     const newBookings = {...bookings};
-    const newClientPkgs = {...clientPkgs};
+    // Track per-package updates to make at the end (one updateDoc per package, batching all sessions)
+    const pkgUpdates = {};  // pkgId -> updated sessions array
+    // Working copy of clientPkgs so credit checks see prior bookings in this loop
+    const workingPkgs = { [currentUser]: (clientPkgs[currentUser]||[]).map(p => ({...p, sessions: [...(p.sessions||[])]})) };
 
     for (const occDate of occurrences) {
       const sk = slotKey(day, slot.time, occDate);
       const dateStr = isoDate(occDate);
-      // Already booked?
-      const existing = (newBookings[sk]||[]).find(b => b.email === currentUser);
-      if (existing) { skipped++; continue; }
-      // Spots available?
+      if ((newBookings[sk]||[]).find(b => b.email === currentUser)) { skipped++; continue; }
       if ((newBookings[sk]||[]).length >= MAX_SPOTS(slot.name)) { skipped++; continue; }
-      // Credit check
-      const userPkgs = (newClientPkgs[currentUser]||[]);
-      const { pkg: usable } = findUsablePackage(userPkgs, slot.name, occDate);
+      const { pkg: usable } = findUsablePackage(workingPkgs[currentUser], slot.name, occDate);
       if (!usable) { skipped++; continue; }
-      // Apply booking
       newBookings[sk] = [...(newBookings[sk]||[]), {email: currentUser, ts: new Date().toISOString(), classDate: dateStr}];
-      newClientPkgs[currentUser] = userPkgs.map(p => p.id === usable.id
-        ? {...p, sessions: [...(p.sessions||[]), {id: Date.now()+Math.random(), date: fmt(occDate), class: slot.name, time: slot.time, day, classDate: dateStr, bookedTs: occDate.getTime()}]}
+      const newSession = {id: Date.now()+Math.random(), date: fmt(occDate), class: slot.name, time: slot.time, day, classDate: dateStr, bookedTs: occDate.getTime()};
+      // Update working copy so the next iteration's credit check is accurate
+      workingPkgs[currentUser] = workingPkgs[currentUser].map(p => p.id === usable.id
+        ? {...p, sessions: [...(p.sessions||[]), newSession]}
         : p);
+      // Queue Firestore update for this package
+      pkgUpdates[usable.id] = workingPkgs[currentUser].find(p => p.id === usable.id).sessions;
       booked++;
     }
 
     setBookings(newBookings);
-    setClientPkgs(newClientPkgs);
+    // Commit all package updates to Firestore in parallel
+    try {
+      await Promise.all(Object.entries(pkgUpdates).map(([pkgId, sessions]) =>
+        updateDoc(doc(db, "clientPackages", pkgId), { sessions })
+      ));
+    } catch (err) {
+      console.error("Recurring booking package update failed:", err);
+    }
     setShowRecurringModal(null);
 
     if (booked > 0) {
@@ -1432,32 +1512,33 @@ export default function NoaPilates() {
     }
   };
 
-  const cancelBooking = (day,time,email=currentUser,dateOverride=null) => {
+  const cancelBooking = async (day,time,email=currentUser,dateOverride=null) => {
     const d = dateOverride || nextOccurrenceOfDay(day);
     if (!isAdmin && !isOpen(day,time)) { fire(t.cancellationClosed,"warn"); return; }
     const sk = slotKey(day,time,d);
     const dateStr = isoDate(d);
-    // Remove from bookings
+    // Remove from bookings (still localStorage for now)
     setBookings(prev=>({...prev,[sk]:(prev[sk]||[]).filter(b=>b.email!==email)}));
-    // Return credit: remove the matching session entry from the user's packages
-    setClientPkgs(prev=>{
-      const userList = prev[email];
-      if (!userList) return prev;
-      let removed = false;
-      const newList = userList.map(p=>{
-        if (removed) return p;
-        // Match by classDate when present; fallback to day+time for legacy entries
+    // Return credit: find the package + session and update in Firestore
+    const userList = clientPkgs[email];
+    if (userList) {
+      // Find the package that has this session
+      for (const p of userList) {
         const idx = (p.sessions||[]).findIndex(s =>
           (s.classDate ? s.classDate === dateStr && s.time===time : s.day===day && s.time===time)
         );
-        if (idx === -1) return p;
-        removed = true;
-        const newSessions = [...p.sessions];
-        newSessions.splice(idx,1);
-        return {...p, sessions:newSessions};
-      });
-      return {...prev, [email]:newList};
-    });
+        if (idx !== -1) {
+          const newSessions = [...p.sessions];
+          newSessions.splice(idx,1);
+          try {
+            await updateDoc(doc(db, "clientPackages", p.id), { sessions: newSessions });
+          } catch (err) {
+            console.error("Failed to refund credit:", err);
+          }
+          break;
+        }
+      }
+    }
     // Notify the next person on the waitlist (if any).
     setWaitlist(prev => {
       const queue = prev[sk] || [];
@@ -1564,7 +1645,7 @@ export default function NoaPilates() {
     return `${m}m`;
   };
 
-  const acceptWaitlistOffer = (day, time, dateOverride=null) => {
+  const acceptWaitlistOffer = async (day, time, dateOverride=null) => {
     const d = dateOverride || nextOccurrenceOfDay(day);
     const sk = slotKey(day, time, d);
     const dateStr = isoDate(d);
@@ -1588,7 +1669,15 @@ export default function NoaPilates() {
       return;
     }
     setBookings(prev => ({...prev, [sk]: [...(prev[sk]||[]), {email: currentUser, ts: new Date().toISOString(), classDate: dateStr}]}));
-    setClientPkgs(prev => ({...prev, [currentUser]: prev[currentUser].map(p => p.id === usable.id ? {...p, sessions: [...p.sessions, {id:Date.now(), date:fmt(d), class:slot.name, time:slot.time, day, classDate:dateStr, bookedTs:d.getTime()}]} : p)}));
+    // Log session in Firestore
+    const newSession = {id:Date.now(), date:fmt(d), class:slot.name, time:slot.time, day, classDate:dateStr, bookedTs:d.getTime()};
+    try {
+      await updateDoc(doc(db, "clientPackages", usable.id), {
+        sessions: [...(usable.sessions||[]), newSession],
+      });
+    } catch (err) {
+      console.error("Failed to update package session:", err);
+    }
     setWaitlist(prev => ({...prev, [sk]: (prev[sk] || []).filter(w => w.email !== currentUser)}));
     setPendingWaitlistOffer(null);
     fire(`✓ ${slot.time} ${slot.name} ${lang==="pt"?"marcada!":"booked!"}`);
@@ -1715,15 +1804,21 @@ export default function NoaPilates() {
   // ── FREEZE / PAUSA DE PACOTE ──────────────────────────────────────
   // Freezing extends the package validity by the same number of days,
   // so the user keeps the days they had when the freeze started.
-  const freezePackage = (email, pkgId, days, reason="") => {
+  const freezePackage = async (email, pkgId, days, reason="") => {
     if (!days || days <= 0) { fire(lang==="pt"?"Insere um número válido":"Enter a valid number","warn"); return; }
     const now = Date.now();
     const endTs = now + days*24*60*60*1000;
+    // Save freeze state in localStorage (admin-only metadata for now)
     setFreezes(prev => ({...prev, [pkgId]: { startTs: now, endTs, days, reason, email }}));
-    setClientPkgs(prev => ({...prev, [email]: (prev[email]||[]).map(p =>
-      p.id === pkgId ? {...p, extraValidityDays: (p.extraValidityDays||0) + days} : p
-    )}));
-    fire(`❄️ ${lang==="pt"?"Pacote pausado":"Package frozen"} ✓`);
+    try {
+      // Extend validity by the freeze period — this is the canonical user-visible effect
+      const p = (clientPkgs[email]||[]).find(p => p.id === pkgId);
+      const newExtra = (p?.extraValidityDays || 0) + days;
+      await updateDoc(doc(db, "clientPackages", pkgId), { extraValidityDays: newExtra });
+      fire(`❄️ ${lang==="pt"?"Pacote pausado":"Package frozen"} ✓`);
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
   const unfreezePackage = (email, pkgId) => {
     const f = freezes[pkgId];
@@ -1743,61 +1838,100 @@ export default function NoaPilates() {
   const freezeInfo = (pkgId) => freezes[pkgId];
 
   // Packages
-  const addPackage = () => {
+  const addPackage = async () => {
     if (!selClientForPkg) { fire("Select a client","warn"); return; }
     const opt = getOpts(selPkgKey).find(o=>o.id===selOptId)||getOpts(selPkgKey)[0];
-    setClientPkgs(prev=>({...prev,[selClientForPkg]:[...(prev[selClientForPkg]||[]),mkEntry(selPkgKey,opt)]}));
-    setShowPkgModal(false);
-    fire(`${t.packageAdded} ${getUserName(selClientForPkg)}!`);
+    const entry = mkEntry(selPkgKey, opt);
+    // Remove the local `id` — Firestore will generate its own document ID.
+    // Add the email so we can group by client.
+    delete entry.id;
+    entry.email = selClientForPkg;
+    try {
+      await addDoc(collection(db, "clientPackages"), entry);
+      setShowPkgModal(false);
+      fire(`${t.packageAdded} ${getUserName(selClientForPkg)}!`);
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
-  const markPaid = (email,pkgId) => {
+  const markPaid = async (email,pkgId) => {
     const now = lisbonNow();
-    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>p.id===pkgId?{...p,paid:true,paidDate:fmt(now),paidTs:now.getTime()}:p)}));
-    fire(t.paymentMarked);
+    try {
+      await updateDoc(doc(db, "clientPackages", pkgId), {
+        paid: true,
+        paidDate: fmt(now),
+        paidTs: now.getTime(),
+      });
+      fire(t.paymentMarked);
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
   // Admin: unmark a payment (e.g. mistake correction)
-  const unmarkPaid = (email,pkgId) => {
-    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>p.id===pkgId?{...p,paid:false,paidDate:null,paidTs:null}:p)}));
-    fire(lang==="pt"?"Pagamento removido":"Payment unmarked","warn");
+  const unmarkPaid = async (email,pkgId) => {
+    try {
+      await updateDoc(doc(db, "clientPackages", pkgId), {
+        paid: false,
+        paidDate: null,
+        paidTs: null,
+      });
+      fire(lang==="pt"?"Pagamento removido":"Payment unmarked","warn");
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
   // Admin: add extra credits to an existing package (e.g. bonus)
-  const addExtraCredits = (email,pkgId,extra) => {
+  const addExtraCredits = async (email,pkgId,extra) => {
     if (!extra || extra <= 0) { fire(lang==="pt"?"Insere um número válido":"Enter a valid number","warn"); return; }
-    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>{
-      if (p.id !== pkgId) return p;
-      // For packages with a qty, increase qty. For packages without (memberships), adjust an "extraSessions" counter.
-      if (p.qty != null) return {...p, qty: p.qty + extra};
-      return {...p, extraSessions: (p.extraSessions||0) + extra};
-    })}));
-    fire(`+${extra} ${lang==="pt"?"créditos adicionados":"credits added"} ✓`);
+    try {
+      // Find the current package in local state to know whether to update qty or extraSessions
+      const p = (clientPkgs[email]||[]).find(p => p.id === pkgId);
+      if (!p) { fire(lang==="pt"?"Pacote não encontrado":"Package not found","warn"); return; }
+      const updates = p.qty != null
+        ? { qty: p.qty + extra }
+        : { extraSessions: (p.extraSessions||0) + extra };
+      await updateDoc(doc(db, "clientPackages", pkgId), updates);
+      fire(`+${extra} ${lang==="pt"?"créditos adicionados":"credits added"} ✓`);
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
-  // Admin: extend validity by N days (used for "give back expired credits" or just extend)
-  const extendValidity = (email,pkgId,days) => {
+  // Admin: extend validity by N days
+  const extendValidity = async (email,pkgId,days) => {
     if (!days || days <= 0) { fire(lang==="pt"?"Insere um número válido de dias":"Enter a valid number of days","warn"); return; }
-    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).map(p=>p.id===pkgId?{...p,extraValidityDays:(p.extraValidityDays||0)+days}:p)}));
-    fire(`+${days} ${lang==="pt"?"dias adicionados":"days added"} ✓`);
+    try {
+      const p = (clientPkgs[email]||[]).find(p => p.id === pkgId);
+      if (!p) { fire(lang==="pt"?"Pacote não encontrado":"Package not found","warn"); return; }
+      await updateDoc(doc(db, "clientPackages", pkgId), {
+        extraValidityDays: (p.extraValidityDays||0) + days,
+      });
+      fire(`+${days} ${lang==="pt"?"dias adicionados":"days added"} ✓`);
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
   // Admin: grant a free bonus package (with custom validity in days)
-  const grantBonusPackage = (email, classType, qty, validityDays) => {
+  const grantBonusPackage = async (email, classType, qty, validityDays) => {
     if (!qty || qty <= 0) { fire(lang==="pt"?"Insere um número válido":"Enter a valid number","warn"); return; }
     const now = lisbonNow();
-    // Pick a parent package key for type/styling
     const pkgKey = classType === "reformer" ? "reformer" : classType === "mat" ? "mat" : "combo";
     const optId = `bonus_${classType}_${Date.now()}`;
     const validityStr = validityDays && validityDays > 0
       ? `${validityDays} day${validityDays>1?"s":""}`
       : null;
+    // For combo bonuses, qty must be even
+    const finalQty = classType === "combo" && qty % 2 !== 0 ? qty - (qty%2) : qty;
     const bonusEntry = {
-      id: Date.now()+Math.random(),
+      email,
       pkgKey,
       optId,
-      label: `🎁 ${lang==="pt"?"Bónus":"Bonus"}: ${qty} ${classType === "reformer" ? "Reformer" : classType === "mat" ? "Mat" : "Combo"}`,
-      qty,
+      label: `🎁 ${lang==="pt"?"Bónus":"Bonus"}: ${finalQty} ${classType === "reformer" ? "Reformer" : classType === "mat" ? "Mat" : "Combo"}`,
+      qty: finalQty,
       price: 0,
       validity: validityStr,
       note: lang==="pt"?"Cortesia do estúdio":"Studio courtesy",
@@ -1809,17 +1943,22 @@ export default function NoaPilates() {
       sessions: [],
       isBonus: true,
     };
-    // For combo bonuses, force qty to be split equally (must be even)
-    if (classType === "combo" && qty % 2 !== 0) {
-      bonusEntry.qty = qty - (qty%2); // make even
+    try {
+      await addDoc(collection(db, "clientPackages"), bonusEntry);
+      fire(`🎁 ${lang==="pt"?"Bónus atribuído":"Bonus granted"} ✓`);
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
     }
-    setClientPkgs(prev=>({...prev, [email]:[...(prev[email]||[]), bonusEntry]}));
-    fire(`🎁 ${lang==="pt"?"Bónus atribuído":"Bonus granted"} ✓`);
   };
 
-  const removePkg = (email,pkgId) => {
-    setClientPkgs(prev=>({...prev,[email]:(prev[email]||[]).filter(p=>p.id!==pkgId)}));
-    fire(t.packageRemoved,"warn");
+  const removePkg = async (email,pkgId) => {
+    if (!confirm(lang==="pt"?"Remover este pacote?":"Remove this package?")) return;
+    try {
+      await deleteDoc(doc(db, "clientPackages", pkgId));
+      fire(t.packageRemoved,"warn");
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
   // Admin: generate a reset link for a specific client
