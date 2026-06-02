@@ -1140,14 +1140,16 @@ export default function NoaPilates() {
       await sendPasswordResetEmail(auth, email);
       // For privacy, always show the same success message even if the email doesn't exist
       fire(lang==="pt"?"Email de recuperação enviado ✓ Verifica a caixa de entrada (e o spam).":"Reset email sent ✓ Check your inbox (and spam folder).", "success");
-      setShowForgotPassword(false);
+      setAuthView("login");
+      resetForm();
     } catch (err) {
       const code = err?.code || "";
       if (code === "auth/invalid-email") fire(lang==="pt"?"Email inválido":"Invalid email","warn");
       else if (code === "auth/user-not-found") {
         // Don't reveal that an email isn't registered — privacy best practice
         fire(lang==="pt"?"Email de recuperação enviado ✓ Verifica a caixa de entrada (e o spam).":"Reset email sent ✓ Check your inbox.","success");
-        setShowForgotPassword(false);
+        setAuthView("login");
+        resetForm();
       }
       else fire(lang==="pt"?`Erro: ${err?.message || code}`:`Error: ${err?.message || code}`, "warn");
     }
