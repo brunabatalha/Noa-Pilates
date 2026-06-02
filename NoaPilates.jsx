@@ -1,4 +1,19 @@
 import { useState, useEffect } from "react";
+import { auth, db } from "./firebase.js";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut as fbSignOut,
+  sendPasswordResetEmail,
+  onAuthStateChanged,
+  updateProfile as fbUpdateProfile,
+} from "firebase/auth";
+import {
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+} from "firebase/firestore";
 
 // ── PERSISTENCE HELPERS ──────────────────────────────────────────────
 // Wrapper around localStorage that gracefully handles SSR and disabled storage
@@ -892,6 +907,47 @@ export default function NoaPilates() {
     document.body.setAttribute("data-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
 
+  // ── FIREBASE AUTH STATE LISTENER ──────────────────────────────────
+  // Fires whenever Firebase auth state changes (login, logout, page reload).
+  // Keeps our local `currentUser` in sync with Firebase Auth.
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (!fbUser) {
+        // No one signed in
+        setCurrentUser(null);
+        return;
+      }
+      // Someone is signed in — fetch their profile from Firestore
+      try {
+        const snap = await getDoc(doc(db, "users", fbUser.uid));
+        if (snap.exists()) {
+          const profile = snap.data();
+          // Cache profile in local users map keyed by email so existing UI continues to work
+          setUsers(prev => ({...prev, [profile.email]: { ...profile, uid: fbUser.uid }}));
+          // Admin uses the magic sentinel value "__admin__", clients use their email
+          if (profile.role === "admin") {
+            setCurrentUser("__admin__");
+            // Make sure adminAccount is set so the existing isAdmin logic works
+            if (!adminAccount || adminAccount.email !== profile.email) {
+              setAdminAccount({ email: profile.email, uid: fbUser.uid });
+            }
+          } else {
+            setCurrentUser(profile.email);
+          }
+        } else {
+          // Auth user exists but no Firestore profile — shouldn't happen in normal flow
+          // Sign them out to keep state consistent
+          await fbSignOut(auth);
+          setCurrentUser(null);
+        }
+      } catch (err) {
+        console.error("Failed to load user profile:", err);
+      }
+    });
+    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Auth form
   const [fName, setFName] = useState("");
   const [fUsername, setFUsername] = useState("");
@@ -1037,37 +1093,64 @@ export default function NoaPilates() {
     setFBdayDay(""); setFBdayMonth("");
   };
 
-  const doSignUp = () => {
+  const doSignUp = async () => {
     if (!fName.trim()||!fUsername.trim()||!fEmail.trim()||!fPassword) { fire(t.fillAllFields,"warn"); return; }
     const email = fEmail.trim().toLowerCase();
-    if (users[email]) { fire(t.emailExists,"warn"); return; }
+    // Username check still uses local cache (Firestore-side username uniqueness comes in Phase 2)
     if (Object.values(users).some(u=>u.username.toLowerCase()===fUsername.trim().toLowerCase())) { fire(t.usernameExists,"warn"); return; }
-    if (fPassword.length < 4) { fire(t.passwordMinLength,"warn"); return; }
+    if (fPassword.length < 6) { fire(lang==="pt"?"Palavra-passe precisa de pelo menos 6 caracteres":"Password needs at least 6 characters","warn"); return; }
     if (fPassword !== fConfirm) { fire(t.passwordsMatch,"warn"); return; }
-    const newUser = {
-      name:fName.trim(), username:fUsername.trim(), email, phone:fPhone.trim(),
-      password:fPassword, joinedAt:fmt(lisbonNow()),
-      bdayDay: fBdayDay ? parseInt(fBdayDay,10) : null,
-      bdayMonth: fBdayMonth ? parseInt(fBdayMonth,10) : null,
-    };
-    setUsers(prev=>({...prev,[email]:newUser}));
-    setCurrentUser(email);
-    fire(`${t.accountCreated} ${fName.trim()}!`);
-    resetForm();
+
+    try {
+      // Create the Firebase Auth account first
+      const cred = await createUserWithEmailAndPassword(auth, email, fPassword);
+      // Save the additional profile info in Firestore (under /users/{uid})
+      const profile = {
+        name: fName.trim(),
+        username: fUsername.trim(),
+        email,
+        phone: fPhone.trim(),
+        joinedAt: fmt(lisbonNow()),
+        bdayDay: fBdayDay ? parseInt(fBdayDay,10) : null,
+        bdayMonth: fBdayMonth ? parseInt(fBdayMonth,10) : null,
+        role: "client",
+      };
+      await setDoc(doc(db, "users", cred.user.uid), profile);
+
+      // Also keep a copy in local `users` map keyed by email so the existing UI continues to work
+      // (Phase 2 will replace this with live Firestore queries.)
+      setUsers(prev => ({...prev, [email]: { ...profile, uid: cred.user.uid }}));
+      // currentUser will be set automatically by the onAuthStateChanged listener
+      fire(`${t.accountCreated} ${fName.trim()}!`);
+      resetForm();
+    } catch (err) {
+      const code = err?.code || "";
+      if (code === "auth/email-already-in-use") fire(t.emailExists, "warn");
+      else if (code === "auth/invalid-email") fire(lang==="pt"?"Email inválido":"Invalid email", "warn");
+      else if (code === "auth/weak-password") fire(lang==="pt"?"Palavra-passe muito fraca":"Password too weak", "warn");
+      else fire(lang==="pt"?`Erro: ${err?.message || code}`:`Error: ${err?.message || code}`, "warn");
+    }
   };
 
-  const requestPasswordReset = () => {
+  // Now uses Firebase: sends a real email with a reset link.
+  const requestPasswordReset = async () => {
     const email = fEmail.trim().toLowerCase();
     if (!email) { fire(t.fillAllFields,"warn"); return; }
-    if (!users[email]) { fire(t.emailNotFound,"warn"); return; }
-    // Generate token
-    const token = Math.random().toString(36).substring(2,10) + Date.now().toString(36);
-    const expiresAt = Date.now() + 60*60*1000; // 1 hour
-    setResetTokens(prev=>({...prev,[token]:{email,expiresAt}}));
-    // Build link (in real app sent by email)
-    const link = `${window.location.origin}${window.location.pathname}?reset=${token}`;
-    setResetLink(link);
-    fire(t.resetLinkSent);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      // For privacy, always show the same success message even if the email doesn't exist
+      fire(lang==="pt"?"Email de recuperação enviado ✓ Verifica a caixa de entrada (e o spam).":"Reset email sent ✓ Check your inbox (and spam folder).", "success");
+      setShowForgotPassword(false);
+    } catch (err) {
+      const code = err?.code || "";
+      if (code === "auth/invalid-email") fire(lang==="pt"?"Email inválido":"Invalid email","warn");
+      else if (code === "auth/user-not-found") {
+        // Don't reveal that an email isn't registered — privacy best practice
+        fire(lang==="pt"?"Email de recuperação enviado ✓ Verifica a caixa de entrada (e o spam).":"Reset email sent ✓ Check your inbox.","success");
+        setShowForgotPassword(false);
+      }
+      else fire(lang==="pt"?`Erro: ${err?.message || code}`:`Error: ${err?.message || code}`, "warn");
+    }
   };
 
   const doResetPassword = () => {
@@ -1088,57 +1171,100 @@ export default function NoaPilates() {
     fire(t.passwordUpdated);
   };
 
-  const doSignIn = () => {
+  const doSignIn = async () => {
     const email = fEmail.trim().toLowerCase();
-    const u = users[email];
-    if (!u || u.password !== fPassword) { fire(t.invalidLogin,"warn"); return; }
-    setCurrentUser(email);
-    fire(`${t.welcomeBack}, ${u.name}!`);
-    resetForm();
+    if (!email || !fPassword) { fire(t.fillAllFields,"warn"); return; }
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, fPassword);
+      // Load the user profile from Firestore so we have name, role, etc.
+      const snap = await getDoc(doc(db, "users", cred.user.uid));
+      if (snap.exists()) {
+        const profile = snap.data();
+        setUsers(prev => ({...prev, [email]: { ...profile, uid: cred.user.uid }}));
+        fire(`${t.welcomeBack}, ${profile.name}!`);
+      } else {
+        // Auth user without a profile — shouldn't happen in normal flow
+        fire(t.welcomeBack);
+      }
+      resetForm();
+      // currentUser will be set by onAuthStateChanged
+    } catch (err) {
+      const code = err?.code || "";
+      if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+        fire(t.invalidLogin,"warn");
+      } else if (code === "auth/too-many-requests") {
+        fire(lang==="pt"?"Muitas tentativas. Tenta novamente daqui a uns minutos.":"Too many attempts. Try again in a few minutes.","warn");
+      } else {
+        fire(lang==="pt"?`Erro: ${err?.message || code}`:`Error: ${err?.message || code}`, "warn");
+      }
+    }
   };
 
-  const doAdminLogin = () => {
+  // Admin login — admin is a regular Firebase user with role: "admin" in their profile.
+  // First admin is set up the first time someone uses this flow (no admin exists yet).
+  const doAdminLogin = async () => {
     const email = fEmail.trim().toLowerCase();
+    if (!email || !fPassword) { fire(t.fillAllFields,"warn"); return; }
+
     if (!adminAccount) {
-      // First-time setup — register the admin account
-      if (!email || !fPassword) { fire(t.fillAllFields,"warn"); return; }
-      if (fPassword.length < 4) { fire(t.passwordMinLength,"warn"); return; }
+      // First-time setup — create the admin account in Firebase Auth + Firestore
+      if (fPassword.length < 6) { fire(lang==="pt"?"Palavra-passe precisa de pelo menos 6 caracteres":"Password needs at least 6 characters","warn"); return; }
       if (fPassword !== fConfirm) { fire(t.passwordsMatch,"warn"); return; }
-      setAdminAccount({ email, password: fPassword });
-      setCurrentUser("__admin__");
-      fire(lang==="pt"?"Conta admin criada! ✓":"Admin account created! ✓");
-      resetForm();
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, fPassword);
+        const adminProfile = {
+          name: lang==="pt" ? "Administrador" : "Administrator",
+          username: "admin",
+          email,
+          phone: "",
+          joinedAt: fmt(lisbonNow()),
+          role: "admin",
+        };
+        await setDoc(doc(db, "users", cred.user.uid), adminProfile);
+        setAdminAccount({ email, uid: cred.user.uid }); // password no longer stored
+        fire(lang==="pt"?"Conta admin criada! ✓":"Admin account created! ✓");
+        resetForm();
+      } catch (err) {
+        const code = err?.code || "";
+        if (code === "auth/email-already-in-use") fire(t.emailExists, "warn");
+        else if (code === "auth/invalid-email") fire(lang==="pt"?"Email inválido":"Invalid email", "warn");
+        else if (code === "auth/weak-password") fire(lang==="pt"?"Palavra-passe muito fraca (mín. 6 caracteres)":"Password too weak (min 6 chars)", "warn");
+        else fire(lang==="pt"?`Erro: ${err?.message || code}`:`Error: ${err?.message || code}`, "warn");
+      }
       return;
     }
-    // Subsequent logins
-    if (email === adminAccount.email && fPassword === adminAccount.password) {
-      setCurrentUser("__admin__");
-      fire("Admin ✓");
-      resetForm();
-    } else {
+
+    // Subsequent admin logins — sign in via Firebase and check the role flag
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, fPassword);
+      const snap = await getDoc(doc(db, "users", cred.user.uid));
+      if (snap.exists() && snap.data().role === "admin") {
+        fire("Admin ✓");
+        resetForm();
+        // currentUser will be set by onAuthStateChanged
+      } else {
+        // This Firebase user exists but isn't an admin — sign them out
+        await fbSignOut(auth);
+        fire(t.invalidAdmin,"warn");
+      }
+    } catch (err) {
       fire(t.invalidAdmin,"warn");
     }
   };
 
-  // Admin: update own credentials
-  const updateAdminCredentials = (newEmail, currentPassword, newPassword) => {
-    if (!adminAccount) return;
-    if (currentPassword !== adminAccount.password) {
-      fire(lang==="pt"?"Palavra-passe atual incorreta":"Current password incorrect","warn"); return;
-    }
-    const updates = { ...adminAccount };
-    if (newEmail && newEmail.trim().toLowerCase() !== updates.email) {
-      updates.email = newEmail.trim().toLowerCase();
-    }
-    if (newPassword) {
-      if (newPassword.length < 4) { fire(t.passwordMinLength,"warn"); return; }
-      updates.password = newPassword;
-    }
-    setAdminAccount(updates);
-    fire(lang==="pt"?"Dados admin atualizados ✓":"Admin updated ✓");
+  // Admin: update own credentials — for now only email change is supported through this UI.
+  // Password change for admin is via the same "Forgot password" flow (Firebase email reset).
+  const updateAdminCredentials = async (newEmail, currentPassword, newPassword) => {
+    fire(lang==="pt"?"Para alterar email/palavra-passe usa o reset por email":"To change email/password use the email reset","warn");
   };
 
-  const doLogout = () => { setCurrentUser(null); resetForm(); setAuthMode("client"); setAuthView("login"); };
+  const doLogout = async () => {
+    try { await fbSignOut(auth); } catch (e) { /* ignore */ }
+    setCurrentUser(null);
+    resetForm();
+    setAuthMode("client");
+    setAuthView("login");
+  };
 
   // Client: edit own profile
   const openEditProfile = () => {
@@ -1149,26 +1275,33 @@ export default function NoaPilates() {
     setEpCurrentPwd(""); setEpNewPwd(""); setEpConfirmPwd("");
     setShowEditProfile(true);
   };
-  const saveEditProfile = () => {
+  const saveEditProfile = async () => {
     if (!epName.trim()) { fire(t.fillAllFields,"warn"); return; }
+    const existing = users[currentUser] || {};
     const updates = {
-      ...users[currentUser],
       name: epName.trim(),
       phone: epPhone.trim(),
       bdayDay: epBdayDay ? parseInt(epBdayDay,10) : null,
       bdayMonth: epBdayMonth ? parseInt(epBdayMonth,10) : null,
     };
+    // Note: password change is now done via the "Forgot password" flow (Firebase email reset).
+    // The old password fields in this modal are kept for backward compatibility but ignored.
     if (epNewPwd) {
-      if (epCurrentPwd !== users[currentUser].password) {
-        fire(lang==="pt"?"Palavra-passe atual incorreta":"Current password incorrect","warn"); return;
-      }
-      if (epNewPwd.length < 4) { fire(t.passwordMinLength,"warn"); return; }
-      if (epNewPwd !== epConfirmPwd) { fire(t.passwordsMatch,"warn"); return; }
-      updates.password = epNewPwd;
+      fire(lang==="pt"?"Para alterar a palavra-passe usa 'Recuperar palavra-passe' no ecrã de login":"To change password use 'Forgot password' on the login screen","warn");
+      return;
     }
-    setUsers(prev=>({...prev,[currentUser]:updates}));
-    setShowEditProfile(false);
-    fire(lang==="pt"?"Perfil atualizado ✓":"Profile updated ✓");
+    try {
+      // If we have a Firestore UID, update the document in Firestore
+      if (existing.uid) {
+        await updateDoc(doc(db, "users", existing.uid), updates);
+      }
+      // Update local cache as well
+      setUsers(prev=>({...prev,[currentUser]:{...existing, ...updates}}));
+      setShowEditProfile(false);
+      fire(lang==="pt"?"Perfil atualizado ✓":"Profile updated ✓");
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
   // Admin: schedule editing
@@ -1764,6 +1897,9 @@ export default function NoaPilates() {
               <button onClick={doAdminLogin} style={S.wineBtn}>
                 {adminAccount ? t.enter : (lang==="pt"?"Criar Admin":"Create Admin")}
               </button>
+              {adminAccount && (
+                <button onClick={()=>{setAuthView("forgot");resetForm();}} style={{...S.linkBtn,fontSize:11,marginTop:8}}>{t.forgotPassword}</button>
+              )}
             </>
           ) : authView==="login" ? (
             <>
@@ -3097,10 +3233,9 @@ export default function NoaPilates() {
               <input value={epBdayMonth} onChange={e=>setEpBdayMonth(e.target.value.replace(/\D/g,"").slice(0,2))} placeholder={t.month} style={{...S.input,flex:1,marginBottom:0}} type="number" min="1" max="12"/>
             </div>
             <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginBottom:10}}>
-              <div style={{fontSize:11,color:C.textLight,marginBottom:8}}>🔐 {lang==="pt"?"Alterar palavra-passe (opcional)":"Change password (optional)"}</div>
-              <input value={epCurrentPwd} onChange={e=>setEpCurrentPwd(e.target.value)} placeholder={t.currentPassword} type="password" style={{...S.input,marginBottom:8}}/>
-              <input value={epNewPwd} onChange={e=>setEpNewPwd(e.target.value)} placeholder={t.newPasswordOpt} type="password" style={{...S.input,marginBottom:8}}/>
-              <input value={epConfirmPwd} onChange={e=>setEpConfirmPwd(e.target.value)} placeholder={t.confirmNewPasswordOpt} type="password" style={S.input}/>
+              <div style={{fontSize:11,color:C.textLight,marginBottom:8,lineHeight:1.5}}>
+                🔐 {lang==="pt"?"Para alterar a palavra-passe, faz logout e usa 'Recuperar palavra-passe' no ecrã de login. Receberás um email para definir uma nova.":"To change your password, log out and use 'Forgot password' on the login screen. You'll receive an email to set a new one."}
+              </div>
             </div>
             <div style={{display:"flex",gap:8,marginTop:14}}>
               <button onClick={()=>setShowEditProfile(false)} style={{...S.outlineBtn,flex:1,padding:"10px"}}>{t.cancelAction}</button>
