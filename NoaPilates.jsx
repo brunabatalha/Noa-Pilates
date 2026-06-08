@@ -1043,6 +1043,39 @@ export default function NoaPilates() {
     return () => unsub();
   }, [currentUser]);
 
+  // ── FIRESTORE LIVE: WAITLIST ───────────────────────────────────────
+  // Subscribe to the entire waitlist collection. Documents have `classKey`,
+  // `email`, `joinedTs`, `notified`, `notifiedTs`. We group by classKey and
+  // sort by joinedTs so the queue order stays stable across devices.
+  useEffect(() => {
+    if (!currentUser) {
+      setWaitlist({});
+      return;
+    }
+    const unsub = onSnapshot(
+      collection(db, "waitlist"),
+      (snap) => {
+        const grouped = {};
+        snap.forEach((docSnap) => {
+          const data = docSnap.data();
+          const k = data?.classKey;
+          if (!k) return;
+          if (!grouped[k]) grouped[k] = [];
+          grouped[k].push({ ...data, ts: data.joinedTs, firestoreId: docSnap.id });
+        });
+        // Sort by joinedTs so the first person to join is always first in the queue
+        Object.keys(grouped).forEach(k => {
+          grouped[k].sort((a, b) => (a.joinedTs || 0) - (b.joinedTs || 0));
+        });
+        setWaitlist(grouped);
+      },
+      (err) => {
+        console.error("waitlist listener error:", err);
+      }
+    );
+    return () => unsub();
+  }, [currentUser]);
+
   // Auth form
   const [fName, setFName] = useState("");
   const [fUsername, setFUsername] = useState("");
@@ -1068,7 +1101,8 @@ export default function NoaPilates() {
   const [SCHEDULE, setSchedule] = useP("schedule_config", DEFAULT_SCHEDULE);
 
   // Lote 1 — new persisted state
-  const [waitlist, setWaitlist] = useP("waitlist", {});           // { slotKey: [ {email, ts, notified} ] }
+  // waitlist now from Firestore — live subscription
+  const [waitlist, setWaitlist] = useState({});           // { slotKey: [ {email, ts, notified, firestoreId} ] }
   const [noShows, setNoShows] = useP("noShows", {});               // { "email|slotKey": { date, note } }
   const [clientNotes, setClientNotes] = useP("clientNotes", {});  // { email: "free text" }
   // Lote 2 — instructors
@@ -1137,15 +1171,15 @@ export default function NoaPilates() {
   const [adminNewPassword, setAdminNewPassword] = useState("");
 
   // Auto-save persisted state whenever it changes.
-  // users, clientPkgs and bookings now live in Firestore — no longer persisted here.
+  // users, clientPkgs, bookings and waitlist now live in Firestore — no longer persisted here.
   useEffect(() => {
     saveState({
       resetTokens, adminAccount, lang,
       packages_config: PACKAGES, schedule_config: SCHEDULE,
-      waitlist, noShows, clientNotes,
+      noShows, clientNotes,
       instructors, freezes,
     });
-  }, [resetTokens, adminAccount, lang, PACKAGES, SCHEDULE, waitlist, noShows, clientNotes, instructors, freezes]);
+  }, [resetTokens, adminAccount, lang, PACKAGES, SCHEDULE, noShows, clientNotes, instructors, freezes]);
 
   const [toast, setToast] = useState(null);
   const t = T[lang];
@@ -1612,14 +1646,18 @@ export default function NoaPilates() {
         }
       }
     }
-    // Notify the next person on the waitlist (if any). [Waitlist still localStorage — Phase 2B.2]
-    setWaitlist(prev => {
-      const queue = prev[sk] || [];
-      if (queue.length === 0) return prev;
-      if (queue[0].notified) return prev;
-      const next = { ...queue[0], notified: true, notifiedTs: Date.now() };
-      return { ...prev, [sk]: [next, ...queue.slice(1)] };
-    });
+    // Notify the next person on the waitlist (if any) — update Firestore
+    const queue = waitlist[sk] || [];
+    if (queue.length > 0 && !queue[0].notified && queue[0].firestoreId) {
+      try {
+        await updateDoc(doc(db, "waitlist", queue[0].firestoreId), {
+          notified: true,
+          notifiedTs: Date.now(),
+        });
+      } catch (err) {
+        console.error("Failed to notify waitlist:", err);
+      }
+    }
     fire(t.bookingCancelled,"warn");
   };
 
@@ -1630,30 +1668,36 @@ export default function NoaPilates() {
 
   // Process every waitlist slot to:
   //  - Detect expired notifications (notifiedTs + WAITLIST_TIMEOUT_MS < now)
-  //  - Remove the expired person from the queue
-  //  - Notify the next person in line
-  // Runs whenever app loads/state changes; idempotent (safe to call repeatedly).
-  const processWaitlistTimeouts = () => {
+  //  - Remove the expired person from the queue (delete Firestore doc)
+  //  - Notify the next person in line (update Firestore doc)
+  // Runs whenever app loads and every minute; idempotent (safe to call repeatedly).
+  const processWaitlistTimeouts = async () => {
     const now = Date.now();
-    let anyChange = false;
-    setWaitlist(prev => {
-      const next = {};
-      for (const [sk, queue] of Object.entries(prev || {})) {
-        if (!queue || queue.length === 0) { next[sk] = queue; continue; }
-        let q = [...queue];
-        // Cascade through expired notifications: if head expired, drop and notify the next
-        while (q.length > 0 && q[0].notified && q[0].notifiedTs && (q[0].notifiedTs + WAITLIST_TIMEOUT_MS) < now) {
-          q.shift(); // drop expired head
-          anyChange = true;
-          if (q.length > 0) {
-            // Notify the new head
-            q[0] = { ...q[0], notified: true, notifiedTs: now };
-          }
+    const deletes = [];
+    const notifies = [];
+    for (const [sk, queue] of Object.entries(waitlist || {})) {
+      if (!queue || queue.length === 0) continue;
+      let q = [...queue];
+      // Cascade through expired notifications: if head expired, drop and notify the next
+      while (q.length > 0 && q[0].notified && q[0].notifiedTs && (q[0].notifiedTs + WAITLIST_TIMEOUT_MS) < now) {
+        const expired = q.shift();
+        if (expired.firestoreId) deletes.push(expired.firestoreId);
+        if (q.length > 0 && !q[0].notified && q[0].firestoreId) {
+          notifies.push(q[0].firestoreId);
+          // Mark locally so we don't re-process in this same loop iteration if multiple expire
+          q[0] = { ...q[0], notified: true, notifiedTs: now };
         }
-        next[sk] = q;
       }
-      return anyChange ? next : prev;
-    });
+    }
+    // Run Firestore writes in parallel — onSnapshot will update local state
+    try {
+      await Promise.all([
+        ...deletes.map(id => deleteDoc(doc(db, "waitlist", id))),
+        ...notifies.map(id => updateDoc(doc(db, "waitlist", id), { notified: true, notifiedTs: now })),
+      ]);
+    } catch (err) {
+      console.error("Waitlist timeout processing failed:", err);
+    }
   };
 
   // Run on mount and again every minute while app is open, so timeouts fire even if
@@ -1663,34 +1707,60 @@ export default function NoaPilates() {
     const interval = setInterval(processWaitlistTimeouts, 60 * 1000); // every 1 min
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [waitlist]);
 
-  const joinWaitlist = (day, time, dateOverride=null) => {
-    const sk = slotKey(day, time, dateOverride);
-    setWaitlist(prev => {
-      const queue = prev[sk] || [];
-      if (queue.find(w => w.email === currentUser)) {
-        fire(lang==="pt"?"Já estás na lista de espera":"Already on the waitlist","warn");
-        return prev;
-      }
-      const newEntry = { email: currentUser, ts: Date.now(), notified: false };
-      return { ...prev, [sk]: [...queue, newEntry] };
-    });
-    fire(lang==="pt"?"Adicionado à lista de espera ✓":"Added to waitlist ✓");
+  const joinWaitlist = async (day, time, dateOverride=null) => {
+    const d = dateOverride || nextOccurrenceOfDay(day);
+    const sk = slotKey(day, time, d);
+    const dateStr = isoDate(d);
+    const queue = waitlist[sk] || [];
+    if (queue.find(w => w.email === currentUser)) {
+      fire(lang==="pt"?"Já estás na lista de espera":"Already on the waitlist","warn");
+      return;
+    }
+    const slot = (SCHEDULE[day]||[]).find(s => s.time === time);
+    try {
+      await addDoc(collection(db, "waitlist"), {
+        email: currentUser,
+        classKey: sk,
+        classDate: dateStr,
+        day,
+        time,
+        className: slot?.name || "",
+        joinedTs: Date.now(),
+        notified: false,
+        notifiedTs: null,
+      });
+      fire(lang==="pt"?"Adicionado à lista de espera ✓":"Added to waitlist ✓");
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
-  const leaveWaitlist = (day, time, email = currentUser, dateOverride=null) => {
+  const leaveWaitlist = async (day, time, email = currentUser, dateOverride=null) => {
     const sk = slotKey(day, time, dateOverride);
-    setWaitlist(prev => {
-      const queue = prev[sk] || [];
-      const wasNotifiedHead = queue[0]?.email === email && queue[0]?.notified;
-      const filtered = queue.filter(w => w.email !== email);
-      if (wasNotifiedHead && filtered.length > 0) {
-        filtered[0] = { ...filtered[0], notified: true, notifiedTs: Date.now() };
+    const queue = waitlist[sk] || [];
+    const entry = queue.find(w => w.email === email);
+    if (!entry?.firestoreId) {
+      fire(lang==="pt"?"Não estás na lista":"Not on waitlist","warn");
+      return;
+    }
+    const wasNotifiedHead = queue[0]?.email === email && queue[0]?.notified;
+    const next = queue[1];
+    try {
+      const ops = [deleteDoc(doc(db, "waitlist", entry.firestoreId))];
+      // If the person leaving was the notified head, promote the next person
+      if (wasNotifiedHead && next?.firestoreId && !next.notified) {
+        ops.push(updateDoc(doc(db, "waitlist", next.firestoreId), {
+          notified: true,
+          notifiedTs: Date.now(),
+        }));
       }
-      return { ...prev, [sk]: filtered };
-    });
-    fire(lang==="pt"?"Removido da lista":"Removed from waitlist","warn");
+      await Promise.all(ops);
+      fire(lang==="pt"?"Removido da lista":"Removed from waitlist","warn");
+    } catch (err) {
+      fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
+    }
   };
 
   const myWaitlistEntry = (day, time, dateOverride=null) => {
@@ -1732,7 +1802,10 @@ export default function NoaPilates() {
     }
     if (spotsLeft(day, time, d) <= 0) {
       fire(lang==="pt"?"Já não há lugares":"No spots available anymore","warn");
-      setWaitlist(prev => ({...prev, [sk]: (prev[sk] || []).filter(w => w.email !== currentUser)}));
+      const myEntry = (waitlist[sk] || []).find(w => w.email === currentUser);
+      if (myEntry?.firestoreId) {
+        try { await deleteDoc(doc(db, "waitlist", myEntry.firestoreId)); } catch (e) {}
+      }
       return;
     }
     const userPkgs = myPkgsFor(currentUser);
@@ -1763,7 +1836,11 @@ export default function NoaPilates() {
       fire(lang==="pt"?`Erro: ${err?.message}`:`Error: ${err?.message}`, "warn");
       return;
     }
-    setWaitlist(prev => ({...prev, [sk]: (prev[sk] || []).filter(w => w.email !== currentUser)}));
+    // Remove this user from waitlist in Firestore
+    const myEntry = (waitlist[sk] || []).find(w => w.email === currentUser);
+    if (myEntry?.firestoreId) {
+      try { await deleteDoc(doc(db, "waitlist", myEntry.firestoreId)); } catch (e) {}
+    }
     setPendingWaitlistOffer(null);
     fire(`✓ ${slot.time} ${slot.name} ${lang==="pt"?"marcada!":"booked!"}`);
   };
@@ -1802,16 +1879,23 @@ export default function NoaPilates() {
       return;
     }
 
-    if (queue.find(w => w.email === email)) {
-      setWaitlist(prev => {
-        const q = prev[sk] || [];
-        const wasNotifiedHead = q[0]?.email === email && q[0]?.notified;
-        const filtered = q.filter(w => w.email !== email);
-        if (wasNotifiedHead && filtered.length > 0) {
-          filtered[0] = { ...filtered[0], notified: true, notifiedTs: Date.now() };
+    // If the added user was in the waitlist, remove them and promote next person if needed
+    const existingEntry = queue.find(w => w.email === email);
+    if (existingEntry?.firestoreId) {
+      const wasNotifiedHead = queue[0]?.email === email && queue[0]?.notified;
+      const next = queue[1];
+      try {
+        const ops = [deleteDoc(doc(db, "waitlist", existingEntry.firestoreId))];
+        if (wasNotifiedHead && next?.firestoreId && !next.notified) {
+          ops.push(updateDoc(doc(db, "waitlist", next.firestoreId), {
+            notified: true,
+            notifiedTs: Date.now(),
+          }));
         }
-        return { ...prev, [sk]: filtered };
-      });
+        await Promise.all(ops);
+      } catch (err) {
+        console.error("Failed to clean waitlist:", err);
+      }
     }
 
     if (isCuttingLine) {
