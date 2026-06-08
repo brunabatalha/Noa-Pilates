@@ -929,6 +929,18 @@ export default function NoaPilates() {
         const snap = await getDoc(doc(db, "users", fbUser.uid));
         if (snap.exists()) {
           const profile = snap.data();
+          // Make sure THIS user has a publicProfile (one-time backfill for accounts created before Phase 3)
+          try {
+            const pubSnap = await getDoc(doc(db, "publicProfiles", fbUser.uid));
+            if (!pubSnap.exists()) {
+              await setDoc(doc(db, "publicProfiles", fbUser.uid), {
+                name: profile.name,
+                email: profile.email,
+                ...(profile.role === "admin" ? { isAdmin: true } : {}),
+              });
+            }
+          } catch (e) { /* ignore — rules may temporarily block until migration */ }
+
           // Cache profile in local users map keyed by email so existing UI continues to work
           setUsers(prev => ({...prev, [profile.email]: { ...profile, uid: fbUser.uid }}));
           // Admin uses the magic sentinel value "__admin__", clients use their email
@@ -956,41 +968,82 @@ export default function NoaPilates() {
   }, []);
 
   // ── FIRESTORE LIVE: USERS ──────────────────────────────────────────
-  // Subscribe to the entire /users collection (admin sees all; clients see all
-  // for now — Phase 3 will scope this down with proper rules).
-  // Only attached once the user is signed in (rules require auth).
+  // Admin: subscribes to the entire /users collection (sees all client data).
+  // Client: subscribes to /publicProfiles (just names) + reads own /users doc
+  //   for personal data. This matches Phase 3 Firestore rules.
   useEffect(() => {
     if (!currentUser) {
       setUsers({});
       return;
     }
-    const unsub = onSnapshot(
-      collection(db, "users"),
-      (snap) => {
-        const next = {};
-        snap.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data?.email) next[data.email] = { ...data, uid: docSnap.id };
-        });
-        setUsers(next);
-      },
-      (err) => {
-        console.error("users listener error:", err);
+    const isAdminUser = currentUser === "__admin__";
+    if (isAdminUser) {
+      // ADMIN: full read of /users
+      const unsub = onSnapshot(
+        collection(db, "users"),
+        (snap) => {
+          const next = {};
+          snap.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (data?.email) next[data.email] = { ...data, uid: docSnap.id };
+          });
+          setUsers(next);
+        },
+        (err) => {
+          console.error("users listener error (admin):", err);
+        }
+      );
+      return () => unsub();
+    } else {
+      // CLIENT: subscribe to /publicProfiles (names only) so the UI can show names
+      // in class lists without violating privacy.
+      const unsub = onSnapshot(
+        collection(db, "publicProfiles"),
+        (snap) => {
+          const next = {};
+          snap.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (data?.email) next[data.email] = { name: data.name, uid: docSnap.id };
+          });
+          // Also include own full profile so client's own perfil tab works.
+          // We fetch own profile via getDoc separately below.
+          setUsers(prev => ({ ...next, [currentUser]: prev[currentUser] || next[currentUser] }));
+        },
+        (err) => {
+          console.error("publicProfiles listener error:", err);
+        }
+      );
+      // Also fetch own full profile once (not subscribed — saveEditProfile updates it locally)
+      const ownEmail = currentUser;
+      // Find own uid by looking up auth.currentUser
+      const fbUser = auth.currentUser;
+      if (fbUser) {
+        getDoc(doc(db, "users", fbUser.uid)).then(snap => {
+          if (snap.exists()) {
+            const data = snap.data();
+            setUsers(prev => ({ ...prev, [ownEmail]: { ...data, uid: fbUser.uid } }));
+          }
+        }).catch(err => console.error("Failed to load own profile:", err));
       }
-    );
-    return () => unsub();
+      return () => unsub();
+    }
   }, [currentUser]);
 
   // ── FIRESTORE LIVE: CLIENT PACKAGES ────────────────────────────────
-  // Subscribe to all client packages. Documents have an `email` field that
-  // we group by, so the existing UI keyed by email continues to work.
+  // Admin: subscribes to all packages.
+  // Client: only subscribes to own packages (where email == own email).
   useEffect(() => {
     if (!currentUser) {
       setClientPkgs({});
       return;
     }
+    const isAdminUser = currentUser === "__admin__";
+    // Build the query: admin gets full collection; client filters by their email
+    const ref = isAdminUser
+      ? collection(db, "clientPackages")
+      : query(collection(db, "clientPackages"), where("email", "==", currentUser));
     const unsub = onSnapshot(
-      collection(db, "clientPackages"),
+      ref,
       (snap) => {
         const grouped = {};
         snap.forEach((docSnap) => {
@@ -998,7 +1051,6 @@ export default function NoaPilates() {
           const email = data?.email;
           if (!email) return;
           if (!grouped[email]) grouped[email] = [];
-          // Store the firestoreId so we can update/delete later, while keeping `id` for UI compatibility
           grouped[email].push({ ...data, id: docSnap.id, firestoreId: docSnap.id });
         });
         setClientPkgs(grouped);
@@ -1247,9 +1299,13 @@ export default function NoaPilates() {
         role: "client",
       };
       await setDoc(doc(db, "users", cred.user.uid), profile);
+      // Also save a minimal public profile (name only) that everyone can read for class lists
+      await setDoc(doc(db, "publicProfiles", cred.user.uid), {
+        name: fName.trim(),
+        email,  // needed to map back from booking.email → name
+      });
 
       // Also keep a copy in local `users` map keyed by email so the existing UI continues to work
-      // (Phase 2 will replace this with live Firestore queries.)
       setUsers(prev => ({...prev, [email]: { ...profile, uid: cred.user.uid }}));
       // currentUser will be set automatically by the onAuthStateChanged listener
       fire(`${t.accountCreated} ${fName.trim()}!`);
@@ -1354,6 +1410,12 @@ export default function NoaPilates() {
           role: "admin",
         };
         await setDoc(doc(db, "users", cred.user.uid), adminProfile);
+        // Admin also gets a public profile (for symmetry, though usually not shown in class lists)
+        await setDoc(doc(db, "publicProfiles", cred.user.uid), {
+          name: adminProfile.name,
+          email,
+          isAdmin: true,
+        });
         setAdminAccount({ email, uid: cred.user.uid }); // password no longer stored
         fire(lang==="pt"?"Conta admin criada! ✓":"Admin account created! ✓");
         resetForm();
@@ -1427,10 +1489,18 @@ export default function NoaPilates() {
       // Update the document in Firestore — onSnapshot will refresh local `users`
       if (existing.uid) {
         await updateDoc(doc(db, "users", existing.uid), updates);
+        // Also update publicProfile if name changed (so class lists stay in sync)
+        if (updates.name !== existing.name) {
+          try {
+            await updateDoc(doc(db, "publicProfiles", existing.uid), { name: updates.name });
+          } catch (e) { /* publicProfile may not exist for legacy accounts; ignore */ }
+        }
       } else {
         fire(lang==="pt"?"Conta sem ID Firebase":"Account missing Firebase ID","warn");
         return;
       }
+      // For clients (own profile only), also update local cache so UI updates immediately
+      setUsers(prev => ({ ...prev, [currentUser]: { ...existing, ...updates } }));
       setShowEditProfile(false);
       fire(lang==="pt"?"Perfil atualizado ✓":"Profile updated ✓");
     } catch (err) {
