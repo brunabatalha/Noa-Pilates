@@ -1395,39 +1395,11 @@ export default function NoaPilates() {
     const email = fEmail.trim().toLowerCase();
     if (!email || !fPassword) { fire(t.fillAllFields,"warn"); return; }
 
-    if (!adminAccount) {
-      // First-time setup — create the admin account in Firebase Auth + Firestore
-      if (fPassword.length < 6) { fire(lang==="pt"?"Palavra-passe precisa de pelo menos 6 caracteres":"Password needs at least 6 characters","warn"); return; }
-      if (fPassword !== fConfirm) { fire(t.passwordsMatch,"warn"); return; }
-      try {
-        const cred = await createUserWithEmailAndPassword(auth, email, fPassword);
-        const adminProfile = {
-          name: lang==="pt" ? "Administrador" : "Administrator",
-          username: "admin",
-          email,
-          phone: "",
-          joinedAt: fmt(lisbonNow()),
-          role: "admin",
-        };
-        await setDoc(doc(db, "users", cred.user.uid), adminProfile);
-        // Admin also gets a public profile (for symmetry, though usually not shown in class lists)
-        await setDoc(doc(db, "publicProfiles", cred.user.uid), {
-          name: adminProfile.name,
-          email,
-          isAdmin: true,
-        });
-        setAdminAccount({ email, uid: cred.user.uid }); // password no longer stored
-        fire(lang==="pt"?"Conta admin criada! ✓":"Admin account created! ✓");
-        resetForm();
-      } catch (err) {
-        const code = err?.code || "";
-        if (code === "auth/email-already-in-use") fire(t.emailExists, "warn");
-        else if (code === "auth/invalid-email") fire(lang==="pt"?"Email inválido":"Invalid email", "warn");
-        else if (code === "auth/weak-password") fire(lang==="pt"?"Palavra-passe muito fraca (mín. 6 caracteres)":"Password too weak (min 6 chars)", "warn");
-        else fire(lang==="pt"?`Erro: ${err?.message || code}`:`Error: ${err?.message || code}`, "warn");
-      }
-      return;
-    }
+    // NOTA DE SEGURANÇA: a criação da conta de administrador foi removida daqui.
+    // Antes, qualquer pessoa que abrisse a app num browser novo via o ecrã
+    // "Configurar Admin" e podia criar-se a si própria como admin.
+    // A conta admin passa a ser criada à mão na consola do Firebase, e as
+    // regras do Firestore impedem que o campo `role` seja escrito pela app.
 
     // Subsequent admin logins — sign in via Firebase and check the role flag
     try {
@@ -2275,26 +2247,12 @@ export default function NoaPilates() {
           {authMode==="admin" ? (
             <>
               <h3 style={{margin:"0 0 14px",fontSize:16,color:C.wine,textAlign:"center",fontFamily:"Georgia,serif"}}>
-                {adminAccount ? t.adminLogin : (lang==="pt"?"Configurar Admin":"Admin Setup")}
+                {t.adminLogin}
               </h3>
-              {!adminAccount && (
-                <p style={{margin:"-8px 0 12px",fontSize:11,color:C.textLight,textAlign:"center",lineHeight:1.5}}>
-                  {lang==="pt"
-                    ? "Primeira utilização. Cria a conta de administrador. Esta operação só pode ser feita uma vez."
-                    : "First-time setup. Create the admin account. This can only be done once."}
-                </p>
-              )}
               <input value={fEmail} onChange={e=>setFEmail(e.target.value)} placeholder={t.adminEmail} style={S.input} type="email"/>
-              <input value={fPassword} onChange={e=>setFPassword(e.target.value)} placeholder={t.adminPassword} style={S.input} type="password" onKeyDown={e=>e.key==="Enter"&&adminAccount&&doAdminLogin()}/>
-              {!adminAccount && (
-                <input value={fConfirm} onChange={e=>setFConfirm(e.target.value)} placeholder={t.confirmPassword} style={S.input} type="password" onKeyDown={e=>e.key==="Enter"&&doAdminLogin()}/>
-              )}
-              <button onClick={doAdminLogin} style={S.wineBtn}>
-                {adminAccount ? t.enter : (lang==="pt"?"Criar Admin":"Create Admin")}
-              </button>
-              {adminAccount && (
-                <button onClick={()=>{setAuthView("forgot");resetForm();}} style={{...S.linkBtn,fontSize:11,marginTop:8}}>{t.forgotPassword}</button>
-              )}
+              <input value={fPassword} onChange={e=>setFPassword(e.target.value)} placeholder={t.adminPassword} style={S.input} type="password" onKeyDown={e=>e.key==="Enter"&&doAdminLogin()}/>
+              <button onClick={doAdminLogin} style={S.wineBtn}>{t.enter}</button>
+              <button onClick={()=>{setAuthView("forgot");resetForm();}} style={{...S.linkBtn,fontSize:11,marginTop:8}}>{t.forgotPassword}</button>
             </>
           ) : authView==="login" ? (
             <>
