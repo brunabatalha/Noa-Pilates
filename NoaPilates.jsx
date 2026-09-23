@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth, db } from "./firebase.js";
 import {
   createUserWithEmailAndPassword,
@@ -1149,18 +1149,250 @@ export default function NoaPilates() {
   const [bookings, setBookings] = useState({});  // { [slotKey]: [ {email, ts, classDate, ...} ] }
   // clientPkgs now from Firestore — live subscription
   const [clientPkgs, setClientPkgs] = useState({});  // { email: [ {id, pkgKey, qty, sessions, paid, ...} ] }
-  const [PACKAGES, setPackages] = useP("packages_config", DEFAULT_PACKAGES);
-  const [SCHEDULE, setSchedule] = useP("schedule_config", DEFAULT_SCHEDULE);
+  // Configuração do estúdio — vive agora no Firestore (studioConfig/*).
+  // Os defaults servem só enquanto a subscrição não trouxe os dados reais.
+  const [PACKAGES, setPackagesLocal] = useState(DEFAULT_PACKAGES);
+  const [SCHEDULE, setScheduleLocal] = useState(DEFAULT_SCHEDULE);
 
   // Lote 1 — new persisted state
   // waitlist now from Firestore — live subscription
   const [waitlist, setWaitlist] = useState({});           // { slotKey: [ {email, ts, notified, firestoreId} ] }
-  const [noShows, setNoShows] = useP("noShows", {});               // { "email|slotKey": { date, note } }
-  const [clientNotes, setClientNotes] = useP("clientNotes", {});  // { email: "free text" }
-  // Lote 2 — instructors
-  const [instructors, setInstructors] = useP("instructors", ["Noa"]);
-  // Lote 2 — freezes (paused packages)
-  const [freezes, setFreezes] = useP("freezes", {}); // { pkgId: { startTs, endTs, days, reason } }
+  // Faltas, notas privadas, instrutoras e congelamentos — agora no Firestore
+  const [noShows, setNoShowsLocal] = useState({});          // { "email|slotKey": { date, note } }
+  const [clientNotes, setClientNotesLocal] = useState({});  // { email: "texto livre" }
+  const [instructors, setInstructorsLocal] = useState(["Noa"]);
+  const [freezes, setFreezesLocal] = useState({});          // { pkgId: { startTs, endTs, days, reason } }
+
+  // ── PERSISTÊNCIA NO FIRESTORE ──────────────────────────────────────
+  // Dois sítios, com permissões diferentes:
+  //   studioConfig/*  → horário, pacotes e instrutoras. Qualquer pessoa com
+  //                     login lê (a app precisa); só o admin escreve.
+  //   adminData/*     → faltas, notas privadas e congelamentos. Só o admin,
+  //                     tanto a ler como a escrever.
+  //
+  // Cada setState continua a atualizar o ecrã de imediato (para a app não
+  // ficar lenta) e envia a versão nova para o Firestore. A subscrição
+  // onSnapshot é a fonte de verdade e propaga para os outros dispositivos.
+
+  const scheduleRef = useRef(DEFAULT_SCHEDULE);
+  const packagesRef = useRef(DEFAULT_PACKAGES);
+  const instructorsRef = useRef(["Noa"]);
+  const noShowsRef = useRef({});
+  const clientNotesRef = useRef({});
+  const freezesRef = useRef({});
+  const notesSaveTimer = useRef(null);
+
+  // As cores e ícones dos pacotes vêm do tema da app, não da base de dados:
+  // guardamos só o que a admin edita (rótulos, preços, validade) e voltamos
+  // a juntar o estilo na leitura.
+  const PKG_STYLE_FIELDS = ["icon", "color", "bg", "border"];
+  const packagesForSave = (pkgs) => {
+    const out = {};
+    for (const [key, cat] of Object.entries(pkgs || {})) {
+      const clean = { ...cat };
+      PKG_STYLE_FIELDS.forEach(f => delete clean[f]);
+      out[key] = clean;
+    }
+    return out;
+  };
+  const packagesFromDb = (stored) => {
+    const out = {};
+    for (const [key, cat] of Object.entries(stored || {})) {
+      const style = DEFAULT_PACKAGES[key] || {};
+      out[key] = {
+        ...cat,
+        icon: style.icon ?? cat.icon,
+        color: style.color ?? cat.color,
+        bg: style.bg ?? cat.bg,
+        border: style.border ?? cat.border,
+      };
+    }
+    return out;
+  };
+
+  const writeDoc = async (col, id, data, label) => {
+    try {
+      await setDoc(doc(db, col, id), { ...data, updatedAt: Date.now() });
+    } catch (err) {
+      console.error(`Falhou a gravar ${col}/${id}:`, err);
+      fire(lang === "pt" ? `Não consegui guardar ${label}` : `Could not save ${label}`, "warn");
+    }
+  };
+
+  const nextValue = (updater, ref) => (typeof updater === "function" ? updater(ref.current) : updater);
+
+  // Enquanto a importação inicial não terminar, os dados em memória ainda
+  // podem ser os valores por defeito. Gravar nessa janela apagaria a
+  // configuração verdadeira, por isso bloqueamos e pedimos para repetir.
+  const dataReadyRef = useRef(false);
+  const notReadyYet = () => {
+    if (dataReadyRef.current) return false;
+    fire(lang === "pt" ? "A carregar os dados do estúdio — tenta daqui a um instante" : "Loading studio data — try again in a moment", "warn");
+    return true;
+  };
+
+  const setSchedule = (updater) => {
+    if (notReadyYet()) return;
+    const next = nextValue(updater, scheduleRef);
+    scheduleRef.current = next;
+    setScheduleLocal(next);
+    writeDoc("studioConfig", "schedule", { days: next }, lang === "pt" ? "o horário" : "the schedule");
+  };
+  const setPackages = (updater) => {
+    if (notReadyYet()) return;
+    const next = nextValue(updater, packagesRef);
+    packagesRef.current = next;
+    setPackagesLocal(next);
+    writeDoc("studioConfig", "packages", { catalog: packagesForSave(next) }, lang === "pt" ? "os pacotes" : "the packages");
+  };
+  const setInstructors = (updater) => {
+    if (notReadyYet()) return;
+    const next = nextValue(updater, instructorsRef);
+    instructorsRef.current = next;
+    setInstructorsLocal(next);
+    writeDoc("studioConfig", "instructors", { list: next }, lang === "pt" ? "as instrutoras" : "the instructors");
+  };
+  const setNoShows = (updater) => {
+    if (notReadyYet()) return;
+    const next = nextValue(updater, noShowsRef);
+    noShowsRef.current = next;
+    setNoShowsLocal(next);
+    writeDoc("adminData", "noShows", { entries: next }, lang === "pt" ? "as faltas" : "the no-shows");
+  };
+  const setFreezes = (updater) => {
+    if (notReadyYet()) return;
+    const next = nextValue(updater, freezesRef);
+    freezesRef.current = next;
+    setFreezesLocal(next);
+    writeDoc("adminData", "freezes", { entries: next }, lang === "pt" ? "as pausas de pacote" : "the freezes");
+  };
+  // As notas são escritas a cada tecla, por isso esperamos que a admin pare
+  // de escrever antes de gravar — evita centenas de escritas no Firestore.
+  const setClientNotes = (updater) => {
+    if (notReadyYet()) return;
+    const next = nextValue(updater, clientNotesRef);
+    clientNotesRef.current = next;
+    setClientNotesLocal(next);
+    if (notesSaveTimer.current) clearTimeout(notesSaveTimer.current);
+    notesSaveTimer.current = setTimeout(() => {
+      notesSaveTimer.current = null; // volta a aceitar atualizações vindas de outro dispositivo
+      writeDoc("adminData", "clientNotes", { notes: clientNotesRef.current }, lang === "pt" ? "as notas" : "the notes");
+    }, 800);
+  };
+
+  // ── FIRESTORE LIVE: CONFIGURAÇÃO DO ESTÚDIO ────────────────────────
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubs = [
+      onSnapshot(doc(db, "studioConfig", "schedule"), (snap) => {
+        const days = snap.exists() ? snap.data()?.days : null;
+        if (days) { scheduleRef.current = days; setScheduleLocal(days); }
+      }, (err) => console.error("studioConfig/schedule listener:", err)),
+
+      onSnapshot(doc(db, "studioConfig", "packages"), (snap) => {
+        const catalog = snap.exists() ? snap.data()?.catalog : null;
+        if (catalog) {
+          const merged = packagesFromDb(catalog);
+          packagesRef.current = merged;
+          setPackagesLocal(merged);
+        }
+      }, (err) => console.error("studioConfig/packages listener:", err)),
+
+      onSnapshot(doc(db, "studioConfig", "instructors"), (snap) => {
+        const list = snap.exists() ? snap.data()?.list : null;
+        if (Array.isArray(list)) { instructorsRef.current = list; setInstructorsLocal(list); }
+      }, (err) => console.error("studioConfig/instructors listener:", err)),
+    ];
+    return () => unsubs.forEach(u => u());
+  }, [currentUser]);
+
+  // ── FIRESTORE LIVE: DADOS RESERVADOS AO ADMIN ──────────────────────
+  useEffect(() => {
+    if (currentUser !== "__admin__") {
+      // Uma cliente nunca lê faltas nem notas — as regras bloqueiam e a app
+      // também não precisa delas.
+      setNoShowsLocal({}); noShowsRef.current = {};
+      setClientNotesLocal({}); clientNotesRef.current = {};
+      setFreezesLocal({}); freezesRef.current = {};
+      dataReadyRef.current = true;
+      return;
+    }
+    // Só volta a ficar pronto quando a importação inicial confirmar que a
+    // cloud já tem os dados desta admin.
+    dataReadyRef.current = false;
+    const unsubs = [
+      onSnapshot(doc(db, "adminData", "noShows"), (snap) => {
+        const entries = snap.exists() ? snap.data()?.entries : null;
+        if (entries) { noShowsRef.current = entries; setNoShowsLocal(entries); }
+      }, (err) => console.error("adminData/noShows listener:", err)),
+
+      onSnapshot(doc(db, "adminData", "clientNotes"), (snap) => {
+        const notes = snap.exists() ? snap.data()?.notes : null;
+        // Não sobrepor o que a admin está a escrever neste momento
+        if (notes && !notesSaveTimer.current) { clientNotesRef.current = notes; setClientNotesLocal(notes); }
+      }, (err) => console.error("adminData/clientNotes listener:", err)),
+
+      onSnapshot(doc(db, "adminData", "freezes"), (snap) => {
+        const entries = snap.exists() ? snap.data()?.entries : null;
+        if (entries) { freezesRef.current = entries; setFreezesLocal(entries); }
+      }, (err) => console.error("adminData/freezes listener:", err)),
+    ];
+    return () => unsubs.forEach(u => u());
+  }, [currentUser]);
+
+  // ── IMPORTAÇÃO ÚNICA DO QUE ESTAVA GUARDADO NO BROWSER ─────────────
+  // Corre na primeira vez que o admin entra: se um documento ainda não
+  // existir no Firestore, escreve-o a partir do que estiver no localStorage
+  // deste browser (ou dos valores por defeito). Não sobrepõe nada que já
+  // exista na cloud, por isso é seguro correr em qualquer dispositivo.
+  // Estado em refs, de propósito: mudar estado aqui faria o efeito correr de
+  // novo e desbloquear as gravações antes de a importação ter terminado.
+  const migrationDoneRef = useRef(false);
+  const migrationRunningRef = useRef(false);
+  useEffect(() => {
+    if (currentUser !== "__admin__") return;
+    if (migrationDoneRef.current) {
+      // Já foi feita nesta sessão (ex.: saiu e voltou a entrar) — não repetir,
+      // mas desbloquear as gravações outra vez.
+      dataReadyRef.current = true;
+      return;
+    }
+    if (migrationRunningRef.current) return;
+    migrationRunningRef.current = true;
+    (async () => {
+      const local = loadState() || {};
+      const jobs = [
+        ["studioConfig", "schedule", { days: local.schedule_config || DEFAULT_SCHEDULE }],
+        ["studioConfig", "packages", { catalog: packagesForSave(local.packages_config || DEFAULT_PACKAGES) }],
+        ["studioConfig", "instructors", { list: local.instructors || ["Noa"] }],
+        ["adminData", "noShows", { entries: local.noShows || {} }],
+        ["adminData", "clientNotes", { notes: local.clientNotes || {} }],
+        ["adminData", "freezes", { entries: local.freezes || {} }],
+      ];
+      let imported = 0;
+      for (const [col, id, data] of jobs) {
+        try {
+          const ref = doc(db, col, id);
+          const snap = await getDoc(ref);
+          if (!snap.exists()) {
+            await setDoc(ref, { ...data, updatedAt: Date.now() });
+            imported++;
+          }
+        } catch (err) {
+          console.error(`Importação falhou em ${col}/${id}:`, err);
+        }
+      }
+      migrationDoneRef.current = true;
+      migrationRunningRef.current = false;
+      dataReadyRef.current = true; // a partir daqui é seguro gravar
+      if (imported > 0) {
+        fire(lang === "pt"
+          ? `☁️ ${imported} definições do estúdio guardadas na cloud ✓`
+          : `☁️ ${imported} studio settings saved to the cloud ✓`);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
 
   // Admin/UI states (NOT persisted)
   const [showAdminSettings, setShowAdminSettings] = useState(false);
@@ -1222,8 +1454,10 @@ export default function NoaPilates() {
   const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
   const [adminNewPassword, setAdminNewPassword] = useState("");
 
-  // Auto-save persisted state whenever it changes.
-  // users, clientPkgs, bookings and waitlist now live in Firestore — no longer persisted here.
+  // Cópia de segurança local. A fonte de verdade é o Firestore: users,
+  // clientPkgs, bookings, waitlist, horário, pacotes, faltas, notas,
+  // instrutoras e congelamentos são lidos de lá. O que fica aqui serve
+  // apenas para a importação inicial e como rede de segurança.
   useEffect(() => {
     saveState({
       resetTokens, adminAccount, lang,
